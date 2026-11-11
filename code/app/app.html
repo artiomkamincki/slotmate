@@ -83,6 +83,8 @@ h1{font-size:34px;line-height:41px;margin:0;font-weight:700;letter-spacing:.01em
 .warnbox,.infobox{margin-top:12px;padding:12px 14px;border-radius:12px;font-size:15px;line-height:1.4}
 .warnbox{background:rgba(255,59,48,.1);color:var(--text)}
 .infobox{background:var(--fill)}
+.paydue{background:rgba(255,149,0,.12);border-radius:12px;padding:14px 16px;margin-bottom:14px;font-size:16px;line-height:1.4}
+.paydue .row{margin-top:10px}
 .sheet .infobox{background:var(--scard)}
 .row{display:flex;gap:10px;margin-top:14px}
 .btn{flex:1;min-height:50px;border-radius:14px;background:var(--tint);color:#fff;font-weight:600;font-size:17px;padding:0 14px}
@@ -224,9 +226,8 @@ function lessonState(l,asT){
     return {chip:onMe?'<span class="chip act">ответьте</span>':'<span class="chip wait">ждём ответа</span>',note:'перенос на '+fmtShort(l.proposed_start)+(l.proposed_scope==='series'?' и далее':''),onMe:onMe};
   }
   if(l.reminder_answer==='no'&&!l.past)return {chip:'<span class="chip bad">'+(asT?'не придёт':'вы не придёте')+'</span>',note:asT?'ученик ответил «не смогу»':'вы ответили «не смогу»'};
-  if(l.clash)return {chip:'<span class="chip bad">'+(asT?'совпадает':'учитель занят')+'</span>',note:'совпадает: '+l.clash};
+  if(l.clash)return asT?{chip:'<span class="chip bad">совпадает</span>',note:'совпадает: '+l.clash}:{chip:'',note:'у учителя: '+l.clash};
   if(asT&&l.pay_due&&!l.past)return {chip:'<span class="chip attn">оплата</span>',note:'ждём оплату'};
-  if(!asT&&l.paid_ok)return {chip:'',note:'оплачен ✓'};
   return {chip:'',note:''};
 }
 function inboxItems(){
@@ -248,7 +249,7 @@ function render(){
   var asT=S.mode==='t';
   if(S.demo)h+='<div class="demo"><span>Демо · никому не отправляется</span><button onclick="A.demoReset()">Сбросить</button><button onclick="A.demoExit()">Выйти</button></div>';
   var title=asT?(S.tab==='week'?'Расписание':S.tab==='students'?'Ученики':'Оплаты'):'Мои уроки';
-  h+='<div class="head"><div><h1>'+title+'</h1><div class="sub">'+esc(d.name)+(asT?' · учитель':' · ученик')+'</div></div><button class="icon" aria-label="Настройки" onclick="A.settings()">'+GEAR+'</button></div>';
+  h+='<div class="head"><div><h1>'+title+'</h1><div class="sub">'+(asT?esc(d.name)+' · учитель':studentSub())+'</div></div><div style="display:flex">'+(asT?'':'<button class="icon" aria-label="Как это работает" onclick="A.help()">?</button>')+'<button class="icon" aria-label="Настройки" onclick="A.settings()">'+GEAR+'</button></div></div>';
   if(d.is_teacher&&d.is_student&&!S.demo)h+='<div class="seg" role="tablist"><button role="tab" aria-selected="'+asT+'" onclick="A.mode(\'t\')">Я учитель</button><button role="tab" aria-selected="'+!asT+'" onclick="A.mode(\'s\')">Я ученик</button></div>';
   if(asT){
     var nIn=inboxCount();
@@ -261,7 +262,7 @@ function render(){
     else fab.innerHTML='<button class="btn" onclick="A.payPick()">Внести оплату</button>'+(due?'<button class="btn sec" onclick="A.remindAll()">Напомнить ('+due+')</button>':'');
   }else{
     h+=renderStudent();
-    fab.style.display='flex';fab.innerHTML='<button class="btn sec" onclick="A.help()">Как это работает</button>';
+    fab.style.display='none';
   }
   app.innerHTML=h;
 }
@@ -336,35 +337,42 @@ function renderPay(){
     if(ps.length>3)h+='<div class="row" style="margin-top:4px"><button class="btn mute" onclick="A.payHistory()">Вся история ('+ps.length+')</button></div>';}
   return h;
 }
+// Экран ученика: когда урок и всё ли оплачено — с одного взгляда. Одна кнопка: «Не смогу прийти».
+function subOf(l){return S.data.my_subs.filter(function(x){return x.id===l.student_id;})[0];}
+function subUses(s){return !!(s&&(s.paid||s.used||s.pack_price));}
+function payMark(l){var s=subOf(l);if(!subUses(s))return '';return l.paid_ok?'<span style="color:var(--ok)">оплачен ✓</span>':'<span style="color:var(--attn)">не оплачен</span>';}
+function studentSub(){var d=S.data,subs=d.my_subs.filter(subUses);
+  if(subs.length!==1)return esc(d.name)+' · ученик';var s=subs[0];
+  if(s.left>0)return esc(s.teacher_name)+' · '+(s.paid_until?'оплачено до '+dm(s.paid_until.slice(0,10)):'осталось '+lw(s.left));
+  return esc(s.teacher_name)+' · ученик';}
 function renderStudent(){
   var d=S.data,h='';
   var mine=d.lessons.filter(function(l){return l.is_mine&&!l.past&&l.status!=='late';});
   var manyT=d.my_subs.length>1;
+  // Пора платить — блок сверху (пока всё оплачено, его нет).
+  d.my_subs.forEach(function(s){if(!subUses(s)||s.left>0)return;
+    var hasNext=mine.some(function(l){return l.student_id===s.id;});if(!s.paid&&!s.used&&!hasNext)return;
+    var what='<b>'+(s.left<0?'Долг: '+lw(-s.left):!s.paid&&!s.used?'Абонемент ещё не оплачен':'Оплаченные уроки закончились')+'</b>'+(s.pack_price?'<div style="font-size:15px;color:var(--muted);margin-top:2px">Абонемент: '+packText(s)+'</div>':'');
+    if(s.claim)h+='<div class="infobox" style="margin:0 0 14px">Вы отметили оплату: '+claimText(s.claim)+'. Ждём, когда '+(manyT?esc(s.teacher_name):'учитель')+' подтвердит.</div>';
+    else h+='<div class="paydue"><div>'+(manyT?esc(s.teacher_name)+' · ':'')+what+'</div><div class="row"><button class="btn" onclick="A.paySoon()">Оплатить</button></div></div>';});
   var next=mine[0];
   if(!next)h+='<div class="lead">Ближайших уроков нет. Когда учитель назначит урок, он появится здесь, а в Телеграм придёт сообщение.</div>';
   else{
-    var st=lessonState(next,false);
-    var chip=st.chip||'<span class="chip ok">подтверждён</span>';
-    h+='<div class="big"><div class="top"><span class="label">Ближайший урок</span>'+chip+'</div><div class="when">'+fmtDate(next.starts_at.slice(0,10))+'</div><div class="tm">'+next.starts_at.slice(11,16)+'–'+endTime(next.starts_at,next.duration)+' · '+esc(next.teacher_name)+'</div>';
+    var st=lessonState(next,false),pm=payMark(next);
+    h+='<div class="big"><div class="top"><span class="label">Следующий урок</span>'+(next.status==='pending'||next.reminder_answer==='no'?st.chip:'')+'</div><div class="when">'+fmtDate(next.starts_at.slice(0,10))+' · '+next.starts_at.slice(11,16)+'</div><div class="tm">до '+endTime(next.starts_at,next.duration)+(manyT?' · '+esc(next.teacher_name):'')+(pm?' · '+pm:'')+'</div>';
     if(next.status==='pending'){
       if(st.onMe)h+='<p class="note">Учитель предлагает перенести на <b>'+fmt(next.proposed_start)+'</b>'+(next.proposed_scope==='series'?' — и все следующие уроки тоже':'')+'. Пока вы не ответили, урок остаётся на старом времени.</p><div class="row"><button class="btn" onclick="A.answer('+next.id+',true)">Подтвердить</button><button class="btn sec" onclick="A.answer('+next.id+',false)">Не подходит</button></div>';
       else h+='<p class="note">Вы предложили <b>'+fmt(next.proposed_start)+'</b>. Ждём ответа учителя — пока урок остаётся на старом времени.</p><div class="row"><button class="btn sec" onclick="A.withdraw('+next.id+')">Отозвать предложение</button></div>';
     }else{
-      if(next.reminder_answer==='no')h+='<div class="infobox">Вы ответили «не смогу». Учитель решит, как быть с уроком. Можно предложить другое время.</div>';
-      else if(next.clash)h+='<div class="warnbox">У учителя в это время: '+esc(next.clash)+'. Скорее всего, придёт предложение переноса — или предложите время сами.</div>';
-      h+='<div class="row"><button class="btn sec" onclick="A.lesson('+next.id+')">Перенести или отменить</button></div>';
+      if(next.reminder_answer==='no')h+='<p class="note">Вы ответили «не смогу». Учитель решит, как быть с уроком.</p><div class="row"><button class="btn sec" onclick="A.lesson('+next.id+')">Предложить другое время</button></div>';
+      else{if(next.clash)h+='<p class="note" style="font-size:15px;color:var(--muted)">У учителя в это время: '+esc(next.clash)+'. Возможно, он предложит другое время.</p>';
+        h+='<div class="row"><button class="btn sec" onclick="A.lesson('+next.id+')">Не смогу прийти</button></div>';}
     }
     h+='</div>';
   }
-  d.my_subs.forEach(function(s){if(!s.paid&&!s.used&&!s.pack_price)return;
-    var pct=s.pack_size?Math.max(0,Math.min(100,Math.round(Math.max(s.left,0)/s.pack_size*100))):0;
-    var head=s.left>0&&s.paid_until?'Оплачено до '+dm(s.paid_until.slice(0,10)):balText(s.left,s.paid,s.used);
-    h+='<div class="big"><div class="top"><span class="label">Абонемент'+(manyT?' · '+esc(s.teacher_name):'')+'</span>'+(s.claim?'<span class="chip wait">ждём учителя</span>':s.left<=0?'<span class="chip attn">пора оплатить</span>':'')+'</div><div class="bal">'+head+'</div><div class="bar"><div style="width:'+pct+'%"></div></div><div class="sub">'+(s.left>0&&s.paid_until?'Осталось '+lw(s.left)+'. ':'')+(s.left<=0&&s.pack_price?'Следующий абонемент: '+packText(s):'Урок списывается, когда он прошёл')+(s.late_hours?'. Отмена позже чем за '+s.late_hours+' ч — урок списывается':'')+'</div>';
-    if(s.claim)h+='<div class="infobox">Вы отметили оплату: '+claimText(s.claim)+'. Ждём, когда учитель подтвердит.</div>';
-    else h+='<div class="row"><button class="btn'+(s.left<=0?'':' sec')+'" onclick="A.paySoon()">Оплатить</button></div>';
-    h+='</div>';});
-  if(mine.length>1){h+='<div class="sect">Дальше</div><div class="group">';mine.slice(1,9).forEach(function(l){var s2=lessonState(l,false);
-    h+='<button class="card" onclick="A.lesson('+l.id+')"><span class="t">'+l.starts_at.slice(11,16)+'</span><span class="n"><b>'+fmtDate(l.starts_at.slice(0,10))+'</b>'+(s2.note||manyT?'<span>'+esc(s2.note||l.teacher_name)+'</span>':'')+'</span>'+s2.chip+'</button>';});h+='</div>';}
+  if(mine.length>1){h+='<div class="sect">Дальше</div><div class="group">';mine.slice(1,9).forEach(function(l){var s2=lessonState(l,false),pm2=payMark(l);
+    var sb=subOf(l),right=s2.chip||(l.paid_ok||!sb||sb.left<=0?'':pm2);
+    h+='<button class="card" onclick="A.lesson('+l.id+')"><span class="t">'+l.starts_at.slice(11,16)+'</span><span class="n"><b>'+fmtDate(l.starts_at.slice(0,10))+'</b>'+(s2.note||manyT?'<span>'+esc(s2.note||l.teacher_name)+'</span>':'')+'</span>'+right+'</button>';});h+='</div>';}
   return h;
 }
 
@@ -424,6 +432,7 @@ var A={
       else openSheet(h+'<div class="infobox">Этот урок уже прошёл.</div>'+close);
       return;
     }
+    if(!asT){A.studentLesson(l,afterNo);return;}
     var hideResched=false;
     if(afterNo)h+='<div class="infobox">Вы ответили «не подходит». Урок пока остаётся на старом времени — можно предложить своё.</div>';
     else if(l.status==='pending'){
@@ -450,6 +459,32 @@ var A={
     openSheet(h);A.chk();
     api('slots',{lesson_id:l.id}).then(function(r){fillSlots('rsSlots','rs',r.slots,A.touch);}).catch(function(){fillSlots('rsSlots','rs',[]);});
   },
+  // Шторка урока у ученика: «Не смогу прийти» → нажал свободное время — предложение ушло.
+  studentLesson:function(l,afterNo){var id=l.id,sub=subOf(l);
+    var h='<h3>'+fmtDate(l.starts_at.slice(0,10))+', '+l.starts_at.slice(11,16)+'–'+endTime(l.starts_at,l.duration)+'</h3><div class="m">Учитель: '+esc(l.teacher_name)+(payMark(l)?' · '+payMark(l):'')+'</div>';
+    var close='<div class="row"><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>';
+    if(l.status==='pending'){var st=lessonState(l,false);
+      if(st.onMe)h+='<div class="infobox">Учитель предлагает: <b>'+fmt(l.proposed_start)+'</b>'+(l.proposed_scope==='series'?' — и все следующие уроки':'')+'. Пока вы не ответили, урок остаётся на старом времени.</div><div class="row"><button class="btn" onclick="A.answer('+id+',true)">Подтвердить</button><button class="btn sec" onclick="A.answer('+id+',false)">Не подходит</button></div>';
+      else h+='<div class="infobox">Вы предложили <b>'+fmt(l.proposed_start)+'</b>. Ждём ответа учителя — пока урок остаётся на старом времени.</div><div class="row"><button class="btn sec" onclick="A.withdraw('+id+')">Отозвать предложение</button></div>';
+      return openSheet(h+close);}
+    if(afterNo)h+='<div class="infobox">Вы ответили «не подходит». Урок пока на старом времени — можно предложить своё.</div>';
+    else if(l.reminder_answer==='no')h+='<div class="infobox">Вы ответили «не смогу». Учитель решит, как быть с уроком — или предложите другое время.</div>';
+    else if(l.clash)h+='<div class="infobox">У учителя в это время: '+esc(l.clash)+'. Возможно, он сам предложит другое время.</div>';
+    h+='<label style="margin-top:20px">Не сможете? Перенести на</label><div class="m" style="font-size:14px;margin:0 0 8px">Нажмите время — учитель получит предложение.</div>'+slotsBox('rsSlots');
+    h+='<div class="row" id="reschedBtn" style="margin-top:6px"><button class="textbtn" onclick="A.showResched()">Другое время…</button></div>';
+    h+='<div id="resched" class="hide">'+dt('rs',l.starts_at.slice(0,10),l.starts_at.slice(11,16),true);
+    if(l.later>0&&l.series_end)h+='<label>Что переносим</label>'+opts('scope',[['one','Только этот урок'],['series',seriesLabel(l)]],'one');
+    h+='<div class="row"><button class="btn" id="sendBtn" disabled onclick="A.propose('+id+')">Предложить перенос</button></div><div class="hint" id="sendHint"></div></div>';
+    h+='<div class="row" style="margin-top:20px"><button class="btn dghost" onclick="A.cancel('+id+')">Отменить урок</button><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>';
+    if(sub&&sub.late_hours)h+='<div class="hint">Отмена позже чем за '+sub.late_hours+' ч до урока — урок списывается с абонемента.</div>';
+    openSheet(h);A.chk();S.sending=false;
+    api('slots',{lesson_id:id}).then(function(r){fillSlots('rsSlots','rs',r.slots,function(){A.proposeQuick(id);});}).catch(function(){fillSlots('rsSlots','rs',[]);});
+  },
+  proposeQuick:function(id){var ts=readTs('rs');if(!ts||S.sending)return;S.sending=true;
+    api('lesson/propose',{id:id,starts_at:ts,scope:'one'}).then(function(r){S.sending=false;
+      if(r.conflict){conflictSheet(r.conflict,'lesson/propose',{},null,function(){A.lesson(id);});return;}
+      closeSheet();load();toast('Предложено: '+fmtShort(ts)+'. Пока урок на старом времени','Отозвать',function(){act('lesson/withdraw',{id:id},'Предложение отозвано');});
+    }).catch(function(){S.sending=false;});},
   propose:function(id){var ts=readTs('rs');if(!ts)return;var sc=optVal('scope')||'one';
     act('lesson/propose',{id:id,starts_at:ts,scope:sc},'Предложение отправлено',function(){A.lesson(id);setTimeout(function(){A.showResched();setTs('rs',ts);A.touch();},0);});},
   withdraw:function(id){act('lesson/withdraw',{id:id},'Предложение отозвано');},
@@ -577,7 +612,7 @@ var A={
   demoExit:function(){S.demo=false;S.mode='';S.tab='week';S.weekStart=null;closeSheet();window.scrollTo(0,0);load();},
   demoReset:function(){api('demo/reset').then(function(){S.weekStart=null;return load();}).then(function(){toast('Демо сброшено');}).catch(function(){});},
   demoAnswer:function(id,ok){api('demo/as_student',{id:id,accept:ok}).then(function(){closeSheet();toast(ok?'Ученик подтвердил перенос':'Ученик ответил «не подходит»');load();}).catch(function(){});},
-  help:function(){openSheet('<h3>Как это работает</h3><div class="m">Время урока меняется, только когда подтвердили обе стороны. Пока ответа нет, урок остаётся на старом времени.<br><br>Если учитель предложит перенос, в Телеграм придёт сообщение с кнопками «Подтвердить» и «Не подходит». Ответить можно и здесь.<br><br>За сутки до урока придёт напоминание с кнопками «Буду» и «Не смогу».<br><br>Оплату абонемента отмечает учитель — после этого уроки появятся на абонементе. Оплатить прямо в приложении можно будет позже.</div><div class="row"><button class="btn" onclick="closeSheetX()">Понятно</button></div>');}
+  help:function(){openSheet('<h3>Как это работает</h3><div class="m">Время урока меняется, только когда подтвердили обе стороны. Пока ответа нет, урок остаётся на старом времени.<br><br>Если учитель предложит перенос, в Телеграм придёт сообщение с кнопками «Подтвердить» и «Не подходит». Ответить можно и здесь.<br><br>Не сможете прийти — нажмите «Не смогу прийти» и выберите свободное время: учитель получит предложение. Там же можно отменить урок.<br><br>За сутки до урока придёт напоминание с кнопками «Буду» и «Не смогу».<br><br>Оплату абонемента отмечает учитель — после этого уроки появятся на абонементе. Оплатить прямо в приложении можно будет позже.</div><div class="row"><button class="btn" onclick="closeSheetX()">Понятно</button></div>');}
 };
 window.A=A;window.closeSheetX=closeSheet;
 function copyText(t){if(navigator.clipboard)navigator.clipboard.writeText(t).then(function(){toast('Скопировано');},function(){toast('Выделите ссылку и скопируйте');});else toast('Выделите ссылку и скопируйте');}

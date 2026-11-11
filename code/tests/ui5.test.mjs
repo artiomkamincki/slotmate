@@ -103,15 +103,20 @@ await D.click('role=tab[name=/Оплаты/]'); await shot(D, '16b-dark-pay');
 const S = await page(OWN);
 await shot(S, '17-student-home');
 await S.click('.card >> nth=0'); await S.waitForTimeout(500); await shot(S, '18-student-lesson');
-await S.click('text=Отменить урок'); await shot(S, '19-cancel-series');
+await S.click('#sheet >> text=Отменить урок'); await shot(S, '19-cancel-series');
 await bg(S);
-// «Оплатить» у ученика — пока муляж: «Оплата пока недоступна»
-await S.click('.big >> text=Оплатить'); await shot(S, '20-student-pay-soon');
+await S.click('[aria-label="Как это работает"]'); await shot(S, '17b-student-help'); await bg(S);
+// Ола в долгу: сверху «Оплаченные уроки закончились · долг» + «Оплатить» (пока муляж)
+const SM = await page(OLA); await shot(SM, '17c-student-pay-due');
+await SM.click('.paydue >> text=Оплатить'); await shot(SM, '20-student-pay-soon');
 const T2 = await page(PAV);
 // v6: урок, где ждём оплату, — кнопка «Получил оплату» в одно нажатие
 await T2.click('[aria-label="Следующая неделя"]'); await T2.waitForTimeout(300);
 await T2.click('.day .card:has-text("Томек") >> nth=0'); await T2.waitForTimeout(500); await shot(T2, '23-teacher-pay-lesson');
 await bg(T2); await T2.click('.fab >> text=+ Урок'); await shot(T2, '24-add-lesson-weekly');
+// «Не смогу прийти» → нажал свободное время → предложение ушло, можно отозвать
+await S.click('.big >> text=Не смогу прийти'); await S.waitForSelector('#rsSlots button'); await shot(S, '18b-student-cant-come');
+await S.click('#rsSlots button >> nth=0'); await S.waitForTimeout(600); await shot(S, '18c-student-proposed');
 console.log('errors:', errs);
 expect(errs.length === 0, 'no JS errors on pages');
 await b.close(); server.close();
