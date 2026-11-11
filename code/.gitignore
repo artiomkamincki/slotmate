@@ -1,0 +1,5 @@
+node_modules/
+tests/bot5.mjs
+tests/screens/
+.DS_Store
+*.icloud

@@ -1,0 +1,14 @@
+# зависимости и то, что создают тесты
+node_modules/
+code/tests/bot5.mjs
+code/tests/screens/
+# служебное macOS / iCloud
+.DS_Store
+*.icloud
+.git.nosync
+# локальные настройки Claude
+.claude/
+# личные заметки — только в iCloud, не на GitHub
+TASKS.md
+CLAUDE.md
+docs/

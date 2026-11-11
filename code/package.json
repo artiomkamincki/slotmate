@@ -1,0 +1,13 @@
+{
+  "name": "slotmate",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node app/build.mjs",
+    "test": "node tests/run-all.mjs",
+    "screens": "node tests/ui5.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.0"
+  }
+}
