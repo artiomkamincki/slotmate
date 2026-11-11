@@ -426,7 +426,7 @@ async function acceptStudentInvite(env, user, code, origin) {
   await send(env, user.tg_id, isNew
     ? `Готово! Ваш учитель — ${esc(teacher.name)}. Когда появится урок, я пришлю его сюда.`
     : `Вы уже записаны. Ваш учитель — ${esc(teacher.name)}.`, appButton(origin));
-  if (isNew) await send(env, teacher.tg_id, `Новый ученик: <b>${esc(user.name)}</b>. Откройте расписание, чтобы назначить урок.`, appButton(origin, 'Назначить урок', `s=${res.meta.last_row_id}`));
+  if (isNew) await send(env, teacher.tg_id, `Новый ученик: <b>${esc(user.name)}</b>. Откройте расписание, чтобы назначить урок.`, appButton(origin, 'Назначить урок', `s=${res.meta.last_row_id}&add=1`));
 }
 
 async function handleCallback(cq, env, origin) {
@@ -899,10 +899,11 @@ async function meData(env, user, body) {
     const { results: st } = await env.DB.prepare(
       `SELECT s.id, u.name,
         (SELECT MIN(starts_at) FROM lessons l WHERE l.student_id = s.id AND l.status IN ('scheduled', 'pending') AND l.starts_at >= ?) AS next,
+        (SELECT MIN(starts_at) FROM lessons l WHERE l.student_id = s.id AND l.status IN ('scheduled', 'pending', 'late') AND substr(l.starts_at, 1, 10) = ?) AS today_at,
         (SELECT COALESCE(SUM(lessons), 0) FROM payments p WHERE p.student_id = s.id) AS paid,
         (SELECT COUNT(*) FROM lessons l WHERE l.student_id = s.id AND ${USED} AND l.starts_at < ?) AS used
        FROM students s JOIN users u ON u.tg_id = s.tg_id WHERE s.teacher_id = ? ORDER BY u.name`
-    ).bind(now, now, user.tg_id).all();
+    ).bind(now, today, now, user.tg_id).all();
     out.students = st.map((s) => ({ ...s, paid: Number(s.paid), used: Number(s.used), left: Number(s.paid) - Number(s.used) }));
     const { results: own } = await env.DB.prepare('SELECT * FROM busy WHERE teacher_id = ? AND day >= ? AND day < ?').bind(user.tg_id, lo, to).all();
     out.busy = own.map((b) => ({ id: b.id, day: b.day, from_t: b.from_t, to_t: b.to_t, note: b.note }));

@@ -45,6 +45,8 @@ for (let i = 0; i < extra.length; i++) { const s = all.find((x) => x.name === ex
   for (let j = 0; j <= i % 4; j++) db.prepare('INSERT INTO lessons (teacher_id, student_id, starts_at) VALUES (?, ?, ?)').run(333, s.id, `${day(-3 - j * 7)} ${9 + i}:00`); }
 // Томек: долг, следующий урок — во вторник (на нём учитель видит «Получил оплату»)
 await api(PAV, 'lesson/add', { student_id: all.find((x) => x.name === 'Томек').id, starts_at: `${d(1)} 12:00`, auto: true });
+// Ева: урок сегодня и долг — «Получил оплату» на главном экране подставит её сама
+db.prepare('INSERT INTO lessons (teacher_id, student_id, starts_at) VALUES (?, ?, ?)').run(333, all.find((x) => x.name === 'Ева').id, `${day(0)} 19:00`);
 
 
 
@@ -69,6 +71,11 @@ const bg = (p) => p.click('#sheetbg', { position: { x: 5, y: 5 } });
 
 const T = await page(PAV);
 await shot(T, '01-teacher-week');
+await T.click('.fab >> text=Получил оплату'); await shot(T, '10-pay-start');
+expect(/Ева/.test(await T.textContent('#sheet')) && /Записать · 4 урока · 600 zł/.test(await T.textContent('#paySave')), 'main button: today\'s student with debt is preselected');
+await T.click('#sheet >> text=Другой'); await shot(T, '10b-pay-who');
+expect(/От кого\?/.test(await T.textContent('#sheet')), 'main button: «Другой» shows who to choose');
+await bg(T);
 await T.click('[aria-label="Следующая неделя"]'); await T.waitForTimeout(300);
 await shot(T, '02-next-week');
 await T.click('.day .card:has-text("Ола") >> nth=0'); await T.waitForTimeout(600); await shot(T, '03-answer-sheet');

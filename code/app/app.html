@@ -93,6 +93,8 @@ h1{font-size:34px;line-height:41px;margin:0;font-weight:700;letter-spacing:.01em
 .btn:active{opacity:.7}
 .btn.sm{min-height:44px;font-size:15px;border-radius:12px}
 .btn.sec{background:var(--tint-soft);color:var(--tint)}
+.fab.three .btn{flex:1 1 0;padding:0 6px;font-size:16px;white-space:nowrap}
+.fab.three .btn:first-child{flex:2 1 0}
 .btn.ghost{background:transparent;color:var(--tint);font-weight:400}
 .btn.mute{background:transparent;color:var(--tint);font-weight:400}
 .btn.danger{background:var(--red);color:#fff}
@@ -207,7 +209,7 @@ function load(){return api('me',{week:S.weekStart}).then(function(d){S.data=d;if
 function deepLink(){
   var lid=+Q.get('l'),sid=+Q.get('s');
   if(lid){var l=L(lid);if(l){if(l.is_teaching&&S.data.is_teacher)S.mode='t';else if(l.is_mine)S.mode='s';render();A.lesson(lid);}else toast('Урок не найден — возможно, он уже отменён или прошёл');}
-  else if(sid&&S.data.is_teacher){S.mode='t';S.tab='students';render();if(Q.get('pay')&&stu(sid))A.pay(sid);else A.student(sid);}
+  else if(sid&&S.data.is_teacher){S.mode='t';S.tab='students';render();if(Q.get('pay')&&stu(sid))A.pay(sid);else if(Q.get('add')&&stu(sid))A.addLesson(sid);else A.student(sid);}
 }
 function act(path,body,okMsg,back){
   return api(path,body).then(function(r){
@@ -262,8 +264,11 @@ function render(){
     h+='<div class="seg tabs" role="tablist"><button role="tab" aria-selected="'+(S.tab==='week')+'" onclick="A.tab(\'week\')">Расписание'+(nIn?'<span class="badge">'+nIn+'</span>':'')+'</button><button role="tab" aria-selected="'+(S.tab!=='week')+'" onclick="A.tab(\'students\')">Ученики'+(due?'<span class="badge">'+due+'</span>':'')+'</button></div>';
     h+=S.tab==='week'?renderInbox()+renderWeek():renderStudents();
     fab.style.display='flex';
-    if(S.tab==='week')fab.innerHTML='<button class="btn" onclick="A.addLesson()">+ Урок</button><button class="btn sec" onclick="A.busy()">Я занят</button>';
-    else fab.innerHTML='<button class="btn" onclick="A.invite()">Пригласить ученика</button>';
+    // Внизу: слева всегда широкая «Получил оплату» (самое частое), справа — действия этой вкладки:
+    // «Расписание» — «+ Урок» и «Я занят», «Ученики» — «+ Ученик». Пока учеников нет — только «Пригласить ученика».
+    fab.classList.toggle('three',!!d.students.length);
+    if(!d.students.length)fab.innerHTML='<button class="btn" onclick="A.invite()">Пригласить ученика</button>';
+    else fab.innerHTML='<button class="btn" onclick="A.payStart()">Получил оплату</button>'+(S.tab==='week'?'<button class="btn sec" onclick="A.addLesson()">+ Урок</button><button class="btn sec" onclick="A.busy()">Я занят</button>':'<button class="btn sec" onclick="A.invite()">+ Ученик</button>');
   }else{
     h+=renderStudent();
     fab.style.display='none';
@@ -315,6 +320,16 @@ function renderWeek(){
 function searchBox(id,ph){return '<input class="search" type="search" id="'+id+'" placeholder="'+ph+'" oninput="A.filter(this)" autocomplete="off">';}
 // Ученики и оплаты — один список: сверху сводка, дальше «Ждём оплату», «Остался 1 урок», остальные.
 function stuRow(s){return '<button class="card" data-n="'+esc(s.name.toLowerCase())+'" onclick="A.student('+s.id+')"><span class="n"><b>'+esc(s.name)+'</b><span>'+(s.next?'следующий: '+fmtShort(s.next):'уроков впереди нет')+'</span></span>'+balShort(s)+'</button>';}
+// Кто, скорее всего, сейчас заплатил: урок сегодня и ждём оплату (ближе ко «сейчас» — выше) → ждём оплату → урок сегодня → остальные.
+function payOrder(){var d=S.data,now=Date.parse(String(d.now).replace(' ','T')),
+  dist=function(s){return Math.abs(Date.parse(s.today_at.replace(' ','T'))-now);},
+  g=function(s){return s.today_at&&isDue(s)?0:isDue(s)?1:s.today_at?2:3;};
+  return d.students.slice().sort(function(a,b){var x=g(a)-g(b);if(x)return x;
+    if(g(a)!==1&&g(a)!==3)return dist(a)-dist(b);
+    if(g(a)===1){var p=a.next||'9',q=b.next||'9';if(p!==q)return p<q?-1:1;}
+    return a.name.localeCompare(b.name,'ru');});}
+function payWhen(s){return s.today_at?'урок сегодня в '+s.today_at.slice(11,16):s.next?'следующий: '+fmtShort(s.next):'уроков впереди нет';}
+function payRow(s){return '<button class="card" data-n="'+esc(s.name.toLowerCase())+'" onclick="A.pay('+s.id+',true)"><span class="n"><b>'+esc(s.name)+'</b><span>'+payWhen(s)+'</span></span>'+balShort(s)+'</button>';}
 function renderStudents(){
   var d=S.data,set=d.settings,m=d.month,h='';
   if(!d.students.length)return '<div class="lead">Пока нет учеников.<br><br>Нажмите «Пригласить ученика» и отправьте ссылку в Телеграме. Кто откроет ссылку, появится здесь, а вам придёт сообщение.</div>';
@@ -567,8 +582,19 @@ var A={
   payHistory:function(){var ps=S.data.payments||[];openSheet('<h3>История оплат</h3><div class="group" style="margin-top:14px">'+ps.map(payHist).join('')+'</div>'+'<div class="row"><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>');},
   // «Получил оплату»: за сколько уроков (1 / абонемент / 2 абонемента / другое), сумма считается сама и правится,
   // сразу видно, что станет с остатком. «Начальный остаток» — тихой ссылкой, только пока у ученика не было оплат.
-  pay:function(id){var s=stu(id),set=S.data.settings;if(!s)return;S.pay={id:id,n:set.pack_size,kind:'pay',own:false};
-    var h='<h3 id="payTitle">Получил оплату</h3><div class="m">'+esc(s.name)+' · '+balText(s.left,s.paid,s.used)+'</div>';
+  // С главной кнопки: ученик подставлен сам (урок сегодня и ждём оплату) — остаётся «Записать». Иначе — «От кого?».
+  payStart:function(){var d=S.data;if(!d.students.length){A.invite();return;}
+    var f=payOrder()[0];if(d.students.length===1||(f.today_at&&isDue(f)))A.pay(f.id,true);else A.payWho(false);},
+  payWho:function(all){var o=payOrder(),top=o.filter(function(s){return s.today_at||isDue(s);}),list=all||!top.length?o:top.slice(0,6);
+    var h='<h3>Получил оплату</h3><div class="m">От кого?</div>';
+    if(list.length>8)h+='<div style="margin-top:14px">'+searchBox('pq','Найти ученика')+'</div>';
+    h+='<div class="grp group" style="margin-top:14px">'+list.map(payRow).join('')+'</div>';
+    if(list.length<o.length)h+='<div class="row" style="margin-top:0"><button class="textbtn" onclick="A.payWho(true)">Все ученики ('+o.length+')</button></div>';
+    openSheet(h+'<div class="row"><button class="btn mute" onclick="closeSheetX()">Отмена</button></div>');},
+  pay:function(id,pick){var s=stu(id),set=S.data.settings;if(!s)return;S.pay={id:id,n:set.pack_size,kind:'pay',own:false};
+    var h='<h3 id="payTitle">Получил оплату</h3>';
+    if(pick&&S.data.students.length>1)h+='<div class="group" style="margin-top:12px"><button class="card" onclick="A.payWho(false)"><span class="n"><b>'+esc(s.name)+'</b><span>'+payWhen(s)+' · '+balText(s.left,s.paid,s.used)+'</span></span><span class="r" style="color:var(--tint)">Другой</span></button></div>';
+    else h+='<div class="m">'+esc(s.name)+' · '+balText(s.left,s.paid,s.used)+'</div>';
     h+='<label>За сколько уроков</label><div class="opts" data-name="pn">'+payPresets(set).map(function(n){return '<button type="button" aria-pressed="'+(n===set.pack_size)+'" data-v="'+n+'" onclick="A.payN(this)">'+n+'</button>';}).join('')+'<button type="button" aria-pressed="false" data-v="x" onclick="A.payN(this)">Другое</button></div>';
     h+='<div id="pnBox" style="display:none;margin-top:10px"><input type="number" inputmode="numeric" id="pn" min="1" max="100" placeholder="Число уроков" aria-label="Число уроков" oninput="A.payUpd()"></div>';
     h+='<div id="pamt"><label for="pa">Сумма, zł</label><input type="number" inputmode="numeric" id="pa" min="0" placeholder="необязательно" oninput="A.payOwn()"></div>';

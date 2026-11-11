@@ -17,6 +17,11 @@ await api(PAV, 'settings', { pack_size: 4, pack_price: 600, default_duration: 60
 // Урок сегодня, оплат нет → бот предлагает варианты.
 await api(PAV, 'lesson/add', { student_id: sid['Ола'], starts_at: nowPlus(2), weeks: 1 });
 const l1 = lastId(sid['Ола']);
+// Для кнопки «Получил оплату» на главном экране сервер сообщает, у кого урок сегодня.
+r = await api(PAV, 'me');
+const sameDay = nowPlus(2).slice(0, 10) === r.j.today;
+expect(!sameDay || r.j.students.find((x) => x.name === 'Ола').today_at === nowPlus(2), 'today_at = her lesson today');
+expect(!r.j.students.find((x) => x.name === 'Марек').today_at, 'no lesson today → no today_at');
 sent.length = 0; await scheduled();
 const ask = sent.find((x) => x.body.chat_id === 333 && /Получили оплату\?/.test(x.body.text || ''));
 const btns = (ask?.body.reply_markup.inline_keyboard || []).flat();

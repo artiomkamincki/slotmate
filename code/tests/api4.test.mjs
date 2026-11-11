@@ -8,7 +8,7 @@ let r = await api(OWN, 'teacher_invite'); await msg(PAV, '/start ' + r.j.link.sp
 r = await api(PAV, 'invite'); const sc = r.j.link.split('start=')[1];
 let c = await msg(OLA, '/start ' + sc);
 const newBtn = c.find((x) => x.body.chat_id === 333).body.reply_markup.inline_keyboard[0][0];
-expect(/\?s=\d+$/.test(newBtn.web_app.url), 'new-student button opens that student: ' + newBtn.web_app.url);
+expect(/\?s=\d+&add=1$/.test(newBtn.web_app.url), 'new-student button opens «Новый урок» for that student: ' + newBtn.web_app.url);
 await msg(MAR, '/start ' + sc); await msg(OWN, '/start ' + sc);
 r = await api(PAV, 'me'); const sid = Object.fromEntries(r.j.students.map((s) => [s.name, s.id]));
 expect(r.j.settings.default_duration === 60 && r.j.settings.late_hours === 0, 'default settings');
