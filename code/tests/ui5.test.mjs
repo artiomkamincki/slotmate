@@ -35,6 +35,9 @@ db.prepare('INSERT INTO lessons (teacher_id, student_id, starts_at) VALUES (?, ?
 // Ола предлагает перенос (учитель должен ответить)
 const olaL = db.prepare('SELECT id FROM lessons WHERE student_id=? AND starts_at=?').get(sid['Ола'], `${d(2)} 18:30`).id;
 await api(OLA, 'lesson/propose', { id: olaL, starts_at: `${d(3)} 18:00`, scope: 'one' });
+// Кася тоже просит перенос — третий вопрос, в блоке видно «Ещё 1»
+const kasL = db.prepare('SELECT id FROM lessons WHERE student_id=? AND starts_at=?').get(sid['Кася'], `${d(5)} 11:00`).id;
+await api(KAS, 'lesson/propose', { id: kasL, starts_at: `${d(5)} 12:30`, scope: 'one' });
 // прошедший урок Марека, на который он ответил «не смогу» — учитель должен решить
 db.prepare("INSERT INTO lessons (teacher_id, student_id, starts_at, reminder_answer) VALUES (?, ?, ?, 'no')").run(333, sid['Марек'], `${day(-1)} 17:00`);
 // ещё 8 учеников для экрана оплат
@@ -71,6 +74,8 @@ const bg = (p) => p.click('#sheetbg', { position: { x: 5, y: 5 } });
 
 const T = await page(PAV);
 await shot(T, '01-teacher-week');
+expect(/Ещё 1 ›/.test(await T.textContent('.inbox')), 'inbox shows 2 questions and «Ещё 1»');
+await T.click('.inbox >> text=Ещё 1'); await shot(T, '01b-inbox-all'); await T.reload(); await T.waitForSelector('h1');
 await T.click('.fab >> text=Получил оплату'); await shot(T, '10-pay-start');
 expect(/Ева/.test(await T.textContent('#sheet')) && /Записать · 4 урока · 600 zł/.test(await T.textContent('#paySave')), 'main button: today\'s student with debt is preselected');
 await T.click('#sheet >> text=Другой'); await shot(T, '10b-pay-who');
@@ -80,6 +85,8 @@ await T.click('[aria-label="Следующая неделя"]'); await T.waitFor
 await shot(T, '02-next-week');
 await T.click('.day .card:has-text("Ола") >> nth=0'); await T.waitForTimeout(600); await shot(T, '03-answer-sheet');
 await T.click('text=Предложить другое время'); await T.waitForTimeout(300); await shot(T, '03b-answer-sheet-open');
+await T.click('#sheet >> text=Другое время…'); await T.locator('#sendBtn').scrollIntoViewIfNeeded(); await shot(T, '03c-other-time');
+expect(/Выберите новую дату или время/.test(await T.textContent('#sendHint')), 'grey «Предложить перенос» explains why');
 await bg(T);
 await T.click('.fab >> text=Я занят');
 await T.fill('#bd', d(5)); await T.click('.opts[data-name="allday"] [data-v="0"]');
