@@ -17,7 +17,7 @@ await api(PAV, 'settings', { pack_size: 4, pack_price: 600, default_duration: 60
 // Урок сегодня, оплат нет → бот предлагает варианты.
 await api(PAV, 'lesson/add', { student_id: sid['Ола'], starts_at: nowPlus(2), weeks: 1 });
 const l1 = lastId(sid['Ола']);
-// Для кнопки «Получил оплату» на главном экране сервер сообщает, у кого урок сегодня.
+// Для кнопки «Внести оплату» на главном экране сервер сообщает, у кого урок сегодня.
 r = await api(PAV, 'me');
 const sameDay = nowPlus(2).slice(0, 10) === r.j.today;
 expect(!sameDay || r.j.students.find((x) => x.name === 'Ола').today_at === nowPlus(2), 'today_at = her lesson today');
@@ -31,7 +31,7 @@ expect(btns.some((b) => b.callback_data === `pd:${l1}:4` && b.text === '4 уро
 expect(btns.some((b) => b.callback_data === `pd:${l1}:8` && b.text === '8 уроков · 1200 zł'), '«8 уроков · 1200 zł»');
 const other = btns.find((b) => b.text === 'Другое…');
 expect(!!other && /\/app\?s=\d+&pay=1$/.test(other.web_app?.url || ''), '«Другое…» opens the payment sheet in the app: ' + (other?.web_app?.url || ''));
-expect(btns.some((b) => b.callback_data === `pl:${l1}`), '«Пока не оплатил» is there');
+expect(btns.some((b) => b.callback_data === `pl:${l1}`), '«Пока не оплачено» is there');
 
 // Нажал «1 урок» — записан 1 урок за 150 zł, ученик получил подтверждение.
 let c = await cb(PAV, `pd:${l1}:1`);

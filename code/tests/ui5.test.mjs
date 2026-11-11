@@ -46,9 +46,9 @@ for (let i = 0; i < extra.length; i++) await msg({ id: 900 + i, first_name: extr
 r = await api(PAV, 'me'); const all = r.j.students;
 for (let i = 0; i < extra.length; i++) { const s = all.find((x) => x.name === extra[i]); if (i % 3) await api(PAV, 'pay/add', { student_id: s.id, lessons: 4, amount: 600 });
   for (let j = 0; j <= i % 4; j++) db.prepare('INSERT INTO lessons (teacher_id, student_id, starts_at) VALUES (?, ?, ?)').run(333, s.id, `${day(-3 - j * 7)} ${9 + i}:00`); }
-// Томек: долг, следующий урок — во вторник (на нём учитель видит «Получил оплату»)
+// Томек: долг, следующий урок — во вторник (на нём учитель видит «Внести оплату»)
 await api(PAV, 'lesson/add', { student_id: all.find((x) => x.name === 'Томек').id, starts_at: `${d(1)} 12:00`, auto: true });
-// Ева: урок сегодня и долг — «Получил оплату» на главном экране подставит её сама
+// Ева: урок сегодня и долг — «Внести оплату» на главном экране подставит её сама
 db.prepare('INSERT INTO lessons (teacher_id, student_id, starts_at) VALUES (?, ?, ?)').run(333, all.find((x) => x.name === 'Ева').id, `${day(0)} 19:00`);
 
 
@@ -76,7 +76,7 @@ const T = await page(PAV);
 await shot(T, '01-teacher-week');
 expect(/Ещё 1 ›/.test(await T.textContent('.inbox')), 'inbox shows 2 questions and «Ещё 1»');
 await T.click('.inbox >> text=Ещё 1'); await shot(T, '01b-inbox-all'); await T.reload(); await T.waitForSelector('h1');
-await T.click('.fab >> text=Получил оплату'); await shot(T, '10-pay-start');
+await T.click('.fab >> text=Внести оплату'); await shot(T, '10-pay-start');
 expect(/Ева/.test(await T.textContent('#sheet')) && /Записать · 4 урока · 600 zł/.test(await T.textContent('#paySave')), 'main button: today\'s student with debt is preselected');
 await T.click('#sheet >> text=Другой'); await shot(T, '10b-pay-who');
 expect(/От кого\?/.test(await T.textContent('#sheet')), 'main button: «Другой» shows who to choose');
@@ -93,8 +93,8 @@ await T.fill('#bd', d(5)); await T.click('.opts[data-name="allday"] [data-v="0"]
 await shot(T, '04-busy-sheet');
 await T.click('#sheet >> text=Отметить'); await T.waitForTimeout(900);
 await shot(T, '05-move-all');
-await T.fill('#mv0d', d(2)); await T.fill('#mv0t', '18:30');
-await T.click('text=Отправить предложения'); await T.waitForTimeout(500);
+await T.click('.mvrow >> text=Другое время…'); await T.fill('#mv0d', d(2)); await T.fill('#mv0t', '18:30');
+await T.click('#sheet >> button:text-is("Отправить")'); await T.waitForTimeout(500);
 await shot(T, '06-move-all-result');
 await T.click('#sheet >> text=Выбрать другое время'); await T.waitForTimeout(700); await shot(T, '07-retry');
 await bg(T);
@@ -105,9 +105,9 @@ await T.fill('#sq', 'ма'); await T.waitForTimeout(200); await shot(T, '08c-stu
 await T.fill('#sq', ''); await T.waitForTimeout(200);
 await T.click('.card:has-text("Ола") >> nth=0'); await shot(T, '09-student-card');
 await bg(T);
-// Марек ждёт оплату: в карточке «Получил оплату» — одно нажатие
+// Марек ждёт оплату: в карточке «Внести оплату» — одно нажатие
 await T.click('.card:has-text("Марек") >> nth=0'); await shot(T, '12-student-card-due');
-await T.click('#sheet >> text=Получил оплату'); await shot(T, '13-pay-sheet');
+await T.click('#sheet >> text=Внести оплату'); await shot(T, '13-pay-sheet');
 expect(/Записать · 4 урока · 600 zł/.test(await T.textContent('#paySave')), 'pay sheet: pack preselected');
 await T.click('.opts[data-name="pn"] [data-v="1"]');
 expect(/Записать · 1 урок · 150 zł/.test(await T.textContent('#paySave')), 'pay sheet: 1 lesson → 150 zł');
@@ -135,7 +135,7 @@ await S.click('[aria-label="Как это работает"]'); await shot(S, '1
 const SM = await page(OLA); await shot(SM, '17c-student-pay-due');
 await SM.click('.paydue >> text=Оплатить'); await shot(SM, '20-student-pay-soon');
 const T2 = await page(PAV);
-// v6: урок, где ждём оплату, — кнопка «Получил оплату» в одно нажатие
+// v6: урок, где ждём оплату, — кнопка «Внести оплату» в одно нажатие
 await T2.click('[aria-label="Следующая неделя"]'); await T2.waitForTimeout(300);
 await T2.click('.day .card:has-text("Томек") >> nth=0'); await T2.waitForTimeout(500); await shot(T2, '23-teacher-pay-lesson');
 await bg(T2); await T2.click('.fab >> text=+ Урок'); await shot(T2, '24-add-lesson-weekly');

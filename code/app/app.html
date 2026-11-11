@@ -32,6 +32,7 @@ h1{font-size:34px;line-height:41px;margin:0;font-weight:700;letter-spacing:.01em
 .seg button[aria-selected=true]{background:var(--seg-on);font-weight:600;box-shadow:0 3px 8px rgba(0,0,0,.12),0 3px 1px rgba(0,0,0,.04)}
 .tabs{margin-bottom:20px}
 .tabs button{min-height:36px}
+.badge.attn{background:var(--attn)}
 .badge{display:inline-block;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--red);color:#fff;font-size:12px;font-weight:600;line-height:18px;text-align:center;letter-spacing:0}
 .weeknav{display:flex;align-items:center;gap:2px;margin:0 -8px 4px}
 .weeknav b{font-size:17px;font-weight:600;flex:1;text-align:center}
@@ -43,7 +44,7 @@ h1{font-size:34px;line-height:41px;margin:0;font-weight:700;letter-spacing:.01em
 .dayh .today{color:var(--tint);font-weight:600}
 .sect{margin-top:28px}
 .sect.hl{display:flex;justify-content:space-between;align-items:flex-end}
-.sect.hl .textbtn{min-height:0;padding:0;font-size:15px;text-transform:none;letter-spacing:0}
+.sect.hl .textbtn{min-height:44px;margin:-14px 0 -12px;padding:0 0 0 12px;font-size:15px;text-transform:none;letter-spacing:0}
 .sect.tog{width:100%;min-height:36px;margin-top:22px;align-items:flex-end}
 .sect.tog span:last-child{color:var(--tint);text-transform:none;font-size:15px;letter-spacing:0}
 .free{font-size:17px;color:var(--muted);padding:11px 16px;position:relative}
@@ -116,6 +117,9 @@ input[type=search],.search{background:var(--fill)!important;min-height:36px;bord
 .two label{margin-left:16px}
 .opts{display:flex;background:var(--fill);border-radius:9px;padding:2px}
 .opts button{flex:1;min-height:36px;padding:4px 8px;border-radius:7px;font-weight:500;font-size:14px;line-height:1.2}
+.opts.vert{flex-direction:column;gap:2px}
+.opts.vert button{text-align:left;min-height:44px;padding:8px 12px;font-size:15px}
+.opts .sub{display:block;font-size:13px;font-weight:400;color:var(--muted);margin-top:2px}
 .opts button[aria-pressed=true]{background:var(--seg-on);font-weight:600;box-shadow:0 3px 8px rgba(0,0,0,.12),0 3px 1px rgba(0,0,0,.04)}
 .slots{display:flex;gap:8px;flex-wrap:wrap}
 .slots button{min-height:40px;padding:0 14px;border-radius:999px;background:var(--tint-soft);color:var(--tint);font-weight:500;font-size:15px}
@@ -164,6 +168,7 @@ var BB=tg&&tg.BackButton&&tg.isVersionAtLeast&&tg.isVersionAtLeast('6.1')?tg.Bac
 var Q=new URLSearchParams(location.search);
 var S={data:null,mode:'',tab:Q.get('tab')==='pay'?'students':(Q.get('tab')||'week'),weekStart:null,deep:true};
 var WD=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+var EVERY=['Каждое воскресенье','Каждый понедельник','Каждый вторник','Каждую среду','Каждый четверг','Каждую пятницу','Каждую субботу'];
 var WDF=['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
 var MON=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
 var MONN=['январе','феврале','марте','апреле','мае','июне','июле','августе','сентябре','октябре','ноябре','декабре'];
@@ -191,7 +196,8 @@ function stu(id){return S.data.students.filter(function(x){return x.id===id;})[0
 function isDue(s){return !!s.due;}
 function balText(left,paid,used){if(!paid&&!used)return 'оплат пока нет';if(left>0)return 'осталось '+lw(left);if(left===0)return 'оплаченные уроки закончились';return 'долг: '+lw(-left);}
 function balShort(s){if(!s.paid&&!s.used)return '<span class="r"'+(s.due?' style="color:var(--attn)"':'')+'>нет оплат</span>';if(s.left>0)return '<span class="r">осталось '+s.left+'</span>';if(s.left===0)return '<span class="r" style="color:var(--attn)">0 уроков</span>';return '<span class="r" style="color:var(--bad)">долг '+(-s.left)+'</span>';}
-function seriesLabel(l,cancel){return l.series_auto?(cancel?'Этот и все следующие (повтор остановится)':'Этот и все следующие'):'Этот и все следующие (до '+dm(l.series_end.slice(0,10))+', всего '+lw(l.later+1)+')';}
+function seriesLabel(l,cancel){return 'Этот и все следующие'+(l.series_auto?(cancel?'<span class="sub">повтор остановится</span>':''):'<span class="sub">до '+dm(l.series_end.slice(0,10))+', всего '+lw(l.later+1)+'</span>');}
+function optsV(name,list,val){return opts(name,list,val).replace('class="opts"','class="opts vert"');}
 function packText(set){return lw(set.pack_size)+(set.pack_price?' · '+set.pack_price+' zł':'');}
 // Сумма за n уроков по цене абонемента: 4 за 600 → 1 урок 150, 8 уроков 1200.
 function priceFor(set,n){if(!set.pack_price||!(n>=1))return 0;var k=n/set.pack_size;return k===Math.floor(k)?set.pack_price*k:Math.round(n*set.pack_price/set.pack_size);}
@@ -264,14 +270,14 @@ function render(){
   if(asT){
     var nIn=inboxCount();
     var due=d.students.filter(isDue).length;
-    h+='<div class="seg tabs" role="tablist"><button role="tab" aria-selected="'+(S.tab==='week')+'" onclick="A.tab(\'week\')">Расписание'+(nIn?'<span class="badge">'+nIn+'</span>':'')+'</button><button role="tab" aria-selected="'+(S.tab!=='week')+'" onclick="A.tab(\'students\')">Ученики'+(due?'<span class="badge">'+due+'</span>':'')+'</button></div>';
+    h+='<div class="seg tabs" role="tablist"><button role="tab" aria-selected="'+(S.tab==='week')+'" onclick="A.tab(\'week\')">Расписание'+(nIn?'<span class="badge">'+nIn+'</span>':'')+'</button><button role="tab" aria-selected="'+(S.tab!=='week')+'" onclick="A.tab(\'students\')">Ученики'+(due?'<span class="badge attn">'+due+'</span>':'')+'</button></div>';
     h+=S.tab==='week'?renderInbox()+renderWeek():renderStudents();
     fab.style.display='flex';
-    // Внизу: слева всегда широкая «Получил оплату» (самое частое), справа — действия этой вкладки:
+    // Внизу: слева всегда широкая «Внести оплату» (самое частое), справа — действия этой вкладки:
     // «Расписание» — «+ Урок» и «Я занят», «Ученики» — «+ Ученик». Пока учеников нет — только «Пригласить ученика».
     fab.classList.toggle('three',!!d.students.length);
     if(!d.students.length)fab.innerHTML='<button class="btn" onclick="A.invite()">Пригласить ученика</button>';
-    else fab.innerHTML='<button class="btn" onclick="A.payStart()">Получил оплату</button>'+(S.tab==='week'?'<button class="btn sec" onclick="A.addLesson()">+ Урок</button><button class="btn sec" onclick="A.busy()">Я занят</button>':'<button class="btn sec" onclick="A.invite()">+ Ученик</button>');
+    else fab.innerHTML='<button class="btn" onclick="A.payStart()">Внести оплату</button>'+(S.tab==='week'?'<button class="btn sec" onclick="A.addLesson()">+ Урок</button><button class="btn sec" onclick="A.busy()">Я занят</button>':'<button class="btn sec" onclick="A.invite()">+ Ученик</button>');
   }else{
     h+=renderStudent();
     fab.style.display='none';
@@ -287,7 +293,7 @@ function renderInbox(){
     else h+='<div class="item"><p><b>'+esc(l.student_name)+'</b> не сможет прийти: '+fmtShort(l.starts_at)+'</p><div class="row"><button class="btn sm" onclick="A.lesson('+l.id+')">Перенести</button><button class="btn sm sec" onclick="A.noCharge('+l.id+')">Отменить без списания</button></div></div>';
     it.push(h);});
   x.claims.forEach(function(c){
-    it.push('<div class="item"><p><b>'+esc(c.name)+'</b> пишет, что оплатил: <b>'+claimText(c)+'</b></p><div class="row"><button class="btn sm" onclick="A.claimAnswer('+c.id+',true)">Получил</button><button class="btn sm sec" onclick="A.claimAnswer('+c.id+',false)">Не получал</button></div></div>');
+    it.push('<div class="item"><p><b>'+esc(c.name)+'</b> пишет, что оплатил: <b>'+claimText(c)+'</b></p><div class="row"><button class="btn sm" onclick="A.claimAnswer('+c.id+',true)">Деньги получены</button><button class="btn sm sec" onclick="A.claimAnswer('+c.id+',false)">Не получены</button></div></div>');
   });
   x.past.forEach(function(c){
     it.push('<div class="item"><p><b>'+esc(c.student_name)+'</b> · '+fmtShort(c.starts_at)+' — урок состоялся?'+(c.why==='no'?' <span class="why" style="display:inline">(отвечал «не смогу»)</span>':'')+'</p><div class="row"><button class="btn sm" onclick="A.resolve('+c.id+',true)">Да, списать</button><button class="btn sm sec" onclick="A.resolve('+c.id+',false)">Не списывать</button></div></div>');
@@ -321,7 +327,7 @@ function renderWeek(){
     h+='</div></div>';
   }
   if(!shown&&d.students.length)h+='<div class="lead" style="margin-top:16px">На этой неделе уроков нет.</div>';
-  if(!d.students.length)h+='<div class="lead" style="margin-top:16px">Пока нет учеников. Откройте вкладку «Ученики» и отправьте ссылку-приглашение.</div>';
+  if(!d.students.length)h+='<div class="lead" style="margin-top:16px">Пока нет учеников. Нажмите «Пригласить ученика» внизу и отправьте ссылку в Телеграме.'+(d.settings.pack_price?'':'<br><br>Заодно можно указать цену абонемента — тогда оплата будет считаться сама.<div class="row"><button class="btn sec" onclick="A.settings()">Указать цену</button></div>')+'</div>';
   return h;
 }
 function searchBox(id,ph){return '<input class="search" type="search" id="'+id+'" placeholder="'+ph+'" oninput="A.filter(this)" autocomplete="off">';}
@@ -360,11 +366,11 @@ function payHist(p){var dt=String(p.created_at).slice(0,10);return '<div class="
 // Экран ученика: когда урок и всё ли оплачено — с одного взгляда. Одна кнопка: «Не смогу прийти».
 function subOf(l){return S.data.my_subs.filter(function(x){return x.id===l.student_id;})[0];}
 function subUses(s){return !!(s&&(s.paid||s.used||s.pack_price));}
-function payMark(l){var s=subOf(l);if(!subUses(s))return '';return l.paid_ok?'<span style="color:var(--ok)">оплачен ✓</span>':'<span style="color:var(--attn)">не оплачен</span>';}
+function payMark(l){var s=subOf(l);if(!subUses(s))return '';return l.paid_ok?'<span style="color:var(--ok)">оплачен ✓</span>':'<span style="color:var(--muted)">не оплачен</span>';}
 function studentSub(){var d=S.data,ms=d.my_subs;
   if(ms.length!==1)return esc(d.name)+' · ученик';var s=ms[0],t='Учитель: '+esc(s.teacher_name);if(!subUses(s))return t;
-  if(s.left>0)return t+' · '+(s.paid_until?'оплачено до '+dm(s.paid_until.slice(0,10)):'осталось '+lw(s.left));
-  if(s.left<0)return t+' · долг '+lw(-s.left);
+  if(s.left>0)return t+'<br>'+(s.paid_until?'оплачено до '+dm(s.paid_until.slice(0,10)):'осталось '+lw(s.left));
+  if(s.left<0)return t+'<br>долг '+lw(-s.left);
   return t;}
 function renderStudent(){
   var d=S.data,h='';
@@ -416,12 +422,14 @@ function seriesSoon(l){return l.is_teaching&&l.series_id&&l.series_end&&l.series
 
 var A={
   mode:function(m){S.mode=m;render();},
+  chat:function(u){var url='https://t.me/'+encodeURIComponent(u);if(tg&&tg.openTelegramLink)tg.openTelegramLink(url);else window.open(url,'_blank');},
   inboxMore:function(){S.inboxAll=true;render();},
   tab:function(t){S.tab=t;render();window.scrollTo(0,0);},
   week:function(n){S.weekStart=n===0?monday(today()):addDays(S.weekStart,7*n);load();},
   pick:function(b){Array.prototype.forEach.call(b.parentNode.children,function(c){c.setAttribute('aria-pressed','false');});b.setAttribute('aria-pressed','true');var nm=b.parentNode.getAttribute('data-name'),x;
     if(nm==='rep'&&(x=document.getElementById('weeksRow')))x.style.display=b.getAttribute('data-v')==='1'?'none':'';
     if(nm==='allday'&&(x=document.getElementById('bhrs')))x.style.display=b.getAttribute('data-v')==='1'?'none':'';
+    if(nm==='sdur'||nm==='slate')A.saveSettings();
     A.chk();},
   filter:function(inp){var q=inp.value.trim().toLowerCase();var root=inp.closest('.sheet')||document.getElementById('app');
     Array.prototype.forEach.call(root.querySelectorAll('.card[data-n]'),function(c){c.style.display=!q||c.getAttribute('data-n').indexOf(q)>=0?'':'none';});
@@ -466,12 +474,12 @@ var A={
     }
     // Оплата — после вопроса о времени. Если там уже есть главная кнопка («Подтвердить»), эта — второстепенная.
     if(asT&&l.pay_due){var ps=stu(l.student_id),none=ps&&!ps.paid&&!ps.used,main=!(l.status==='pending'&&lessonState(l,asT).onMe);
-      h+='<div class="infobox">'+(none?'Оплаты ещё не было':'Оплаченные уроки закончились')+' — ждём оплату.</div><div class="row"><button class="btn'+(main?'':' sec')+'" onclick="A.pay('+l.student_id+')">Получил оплату</button></div>';}
+      h+='<div class="infobox">'+(none?'Оплаты ещё не было':'Оплаченные уроки закончились')+' — ждём оплату.</div><div class="row"><button class="btn'+(main?'':' sec')+'" onclick="A.pay('+l.student_id+')">Внести оплату</button></div>';}
     if(hideResched)h+='<div class="row" id="reschedBtn"><button class="btn ghost" onclick="A.showResched()">Предложить другое время</button></div>';
     // Перенос: нажал свободное время — предложение ушло ученику. Ручной выбор — под «Другое время…».
     h+='<div id="resched"'+(hideResched?' class="hide"':'')+'><label style="margin-top:20px">Перенести на · нажмите время</label><div class="m" style="font-size:14px;margin:0 0 8px">Ученик получит предложение с кнопками «Подтвердить» и «Не подходит».</div>'+slotsBox('rsSlots');
     h+='<div class="row" id="otherBtn" style="margin-top:6px"><button class="textbtn" onclick="A.showOther()">Другое время…</button></div><div id="other" class="hide">'+dt('rs',l.starts_at.slice(0,10),l.starts_at.slice(11,16),true);
-    if(l.later>0&&l.series_end)h+='<label>Что переносим</label>'+opts('scope',[['one','Только этот урок'],['series',seriesLabel(l)]],'one');
+    if(l.later>0&&l.series_end)h+='<label>Что переносим</label>'+optsV('scope',[['one','Только этот урок'],['series',seriesLabel(l)]],'one');
     h+='<div class="row"><button class="btn" id="sendBtn" disabled onclick="A.propose('+l.id+')">Предложить перенос</button></div><div class="hint" id="sendHint"></div></div></div>';
     if(asT&&!l.series_auto&&seriesSoon(l))h+='<div class="infobox">Регулярные уроки заканчиваются '+dm(l.series_end.slice(0,10))+'.</div><div class="row"><button class="btn sec" onclick="A.extend('+l.series_id+')">Продлевать автоматически</button></div>';
     h+='<div class="row" style="margin-top:20px"><button class="btn dghost" onclick="A.cancel('+l.id+')">Отменить урок</button><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>';
@@ -493,7 +501,7 @@ var A={
     h+='<label style="margin-top:20px">Не сможете? Перенести на</label><div class="m" style="font-size:14px;margin:0 0 8px">Нажмите время — учитель получит предложение.</div>'+slotsBox('rsSlots');
     h+='<div class="row" id="reschedBtn" style="margin-top:6px"><button class="textbtn" onclick="A.showResched()">Другое время…</button></div>';
     h+='<div id="resched" class="hide">'+dt('rs',l.starts_at.slice(0,10),l.starts_at.slice(11,16),true);
-    if(l.later>0&&l.series_end)h+='<label>Что переносим</label>'+opts('scope',[['one','Только этот урок'],['series',seriesLabel(l)]],'one');
+    if(l.later>0&&l.series_end)h+='<label>Что переносим</label>'+optsV('scope',[['one','Только этот урок'],['series',seriesLabel(l)]],'one');
     h+='<div class="row"><button class="btn" id="sendBtn" disabled onclick="A.propose('+id+')">Предложить перенос</button></div><div class="hint" id="sendHint"></div></div>';
     h+='<div class="row" style="margin-top:20px"><button class="btn dghost" onclick="A.cancel('+id+')">Отменить урок</button><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>';
     if(sub&&sub.late_hours)h+='<div class="hint">Отмена позже чем за '+sub.late_hours+' ч до урока — урок списывается с абонемента.</div>';
@@ -519,7 +527,7 @@ var A={
   voidDo:function(id){act('lesson/void',{id:id},'Урок не списан');},
   cancel:function(id){var l=L(id),asT=S.mode==='t'&&l.is_teaching;var h='<h3>Отменить урок?</h3><div class="m">'+cap(fmt(l.starts_at))+'. '+(asT?'Ученик получит сообщение. С абонемента не списывается.':'Учитель получит сообщение.')+'</div>';
     if(!asT&&l.late_charge)h+='<div class="warnbox">Это поздняя отмена: до урока меньше '+l.late_hours+' ч. По правилу учителя урок будет списан с абонемента. Лучше предложить другое время.</div>';
-    if(l.later>0&&l.series_end)h+='<label>Что отменяем</label>'+opts('cscope',[['one','Только этот урок'],['series',seriesLabel(l,true)]],'one');
+    if(l.later>0&&l.series_end)h+='<label>Что отменяем</label>'+optsV('cscope',[['one','Только этот урок'],['series',seriesLabel(l,true)]],'one');
     openSheet(h+'<div class="row"><button class="btn sec" onclick="A.lesson('+id+')">Не отменять</button><button class="btn danger" onclick="A.cancelDo('+id+')">Да, отменить</button></div>');},
   cancelDo:function(id){api('lesson/cancel',{id:id,scope:optVal('cscope')||'one'}).then(function(r){closeSheet();toast(r.count>1?'Отменено: '+lw(r.count):'Урок отменён');load();}).catch(function(){});},
 
@@ -549,9 +557,9 @@ var A={
   moveBusy:function(bid){var b=S.data.busy.filter(function(x){return x.id===bid;})[0];var aff=busyAffected(b).map(function(l){return {id:l.id,starts_at:l.starts_at,student_name:l.student_name,status:l.status};});if(aff.length)A.moveAll(aff);},
   moveAll:function(aff,note){
     S.moving=aff;
-    var h='<h3>'+(note?'Выберите другое время':'Уроки на это время: '+aff.length)+'</h3><div class="m">'+(note||'Нажмите на свободное время или укажите своё — ученики получат предложение с кнопками «Подтвердить» и «Не подходит».')+'</div>';
-    aff.forEach(function(a,i){h+='<div class="mvrow"><label class="hd"><input type="checkbox" id="mvc'+i+'" checked><span><b>'+esc(a.student_name)+'</b><span class="m" style="display:block;font-size:14px">сейчас: '+fmtShort(a.starts_at)+'</span></span></label>'+slotsBox('mvs'+i)+dt('mv'+i,addDays(a.starts_at.slice(0,10),1),a.starts_at.slice(11,16))+'</div>';});
-    openSheet(h+'<div class="row"><button class="btn sec" onclick="closeSheetX()">Позже</button><button class="btn" onclick="A.moveAllDo()">Отправить предложения</button></div><div class="hint">«Позже» — вернуться можно кнопкой «Перенести уроки» в расписании.</div>');
+    var h='<h3>'+(note?'Выберите другое время':'Нужно перенести: '+lw(aff.length))+'</h3><div class="m">'+(note||'Уже выбрано ближайшее свободное время — можно нажать другое. Ученики получат предложение с кнопками «Подтвердить» и «Не подходит».')+'</div>';
+    aff.forEach(function(a,i){h+='<div class="mvrow"><label class="hd"><input type="checkbox" id="mvc'+i+'" checked><span><b>'+esc(a.student_name)+'</b><span class="m" style="display:block;font-size:14px">сейчас: '+fmtShort(a.starts_at)+'</span></span></label>'+slotsBox('mvs'+i)+'<button class="textbtn" style="padding:0;margin-top:4px" onclick="this.style.display=\'none\';document.getElementById(\'mvo'+i+'\').classList.remove(\'hide\')">Другое время…</button><div id="mvo'+i+'" class="hide">'+dt('mv'+i,addDays(a.starts_at.slice(0,10),1),a.starts_at.slice(11,16))+'</div></div>';});
+    openSheet(h+'<div class="row"><button class="btn" onclick="A.moveAllDo()">Отправить</button><button class="btn sec" onclick="closeSheetX()">Позже</button></div><div class="hint">«Позже» — вернуться можно кнопкой «Перенести уроки» в расписании.</div>');
     aff.forEach(function(a,i){api('slots',{lesson_id:a.id,limit:4}).then(function(r){fillSlots('mvs'+i,'mv'+i,r.slots);var best=r.best||r.slots[0];if(best){setTs('mv'+i,best);var b=document.querySelector('#mvs'+i+' button[data-ts="'+best+'"]');if(b)b.setAttribute('aria-pressed','true');}}).catch(function(){fillSlots('mvs'+i,'mv'+i,[]);});});
   },
   moveAllDo:function(){
@@ -572,14 +580,16 @@ var A={
     openSheet('<h3>Убрать отметку?</h3><div class="m">'+esc(b.note)+', '+fmtDate(b.day)+'. Уже отправленные предложения переноса останутся.</div><div class="row"><button class="btn sec" onclick="closeSheetX()">Оставить</button><button class="btn danger" onclick="A.unbusyDo('+id+')">Убрать</button></div>');},
   unbusyDo:function(id){act('busy/remove',{id:id},'Отметка убрана');},
 
-  // Карточка ученика: «Получил оплату», уроки, история оплат.
+  // Карточка ученика: «Внести оплату», уроки, история оплат.
   student:function(id){var s=stu(id);if(!s)return;var d=S.data,due=isDue(s);
     var ls=d.lessons.filter(function(l){return l.student_id===id&&l.is_teaching&&!l.past&&l.status!=='late';}).slice(0,4);
     var ps=(d.payments||[]).filter(function(p){return p.student_id===id;});
     var bal=balText(s.left,s.paid,s.used),col=s.left<0?'var(--bad)':due?'var(--attn)':'';
-    var h='<h3>'+esc(s.name)+'</h3><div class="m">'+(d.uses_pay?'<span'+(col?' style="color:'+col+'"':'')+'>'+bal.charAt(0).toUpperCase()+bal.slice(1)+'</span>':'Ученик')+(s.next?' · следующий '+fmtShort(s.next):'')+'</div>';
-    if(due)h+='<div class="row"><button class="btn" onclick="A.pay('+id+')">Получил оплату</button></div>';
-    h+='<div class="row"><button class="btn sec" onclick="A.addLesson('+id+')">+ Урок</button>'+(due?'<button class="btn sec" onclick="A.remind('+id+')">Напомнить</button>':'<button class="btn sec" onclick="A.pay('+id+')">Получил оплату</button>')+'</div>';
+    var rep=ls.filter(function(l){return l.series;})[0];
+    var h='<h3>'+esc(s.name)+'</h3>'+(rep?'<div class="m">'+EVERY[wd(rep.starts_at.slice(0,10))]+' в '+rep.starts_at.slice(11,16)+'</div>':'')+'<div class="m">'+(d.uses_pay?'<span'+(col?' style="color:'+col+'"':'')+'>'+bal.charAt(0).toUpperCase()+bal.slice(1)+'</span>':'Ученик')+(s.next?' · следующий '+fmtShort(s.next):'')+'</div>';
+    if(due)h+='<div class="row"><button class="btn" onclick="A.pay('+id+')">Внести оплату</button></div>';
+    h+='<div class="row"><button class="btn sec" onclick="A.addLesson('+id+')">+ Урок</button>'+(due?'<button class="btn sec" onclick="A.remind('+id+')">Напомнить</button>':'<button class="btn sec" onclick="A.pay('+id+')">Внести оплату</button>')+'</div>';
+    if(s.username)h+='<div class="row" style="margin-top:0"><button class="textbtn" onclick="A.chat(\''+esc(s.username)+'\')">Написать в Телеграм</button></div>';
     h+='<div class="sect">Ближайшие уроки</div>';
     if(!ls.length)h+='<div class="m" style="padding:10px 0">Нет запланированных уроков.</div>';
     else h+='<div class="group">'+ls.map(function(l){var st=lessonState(l,true);return '<button class="card" onclick="A.lesson('+l.id+')"><span class="t">'+l.starts_at.slice(11,16)+'</span><span class="n"><b>'+fmtDate(l.starts_at.slice(0,10))+'</b>'+(st.note?'<span>'+esc(st.note)+'</span>':'')+'</span>'+st.chip+'</button>';}).join('')+'</div>';
@@ -590,22 +600,22 @@ var A={
   removeDo:function(id){act('student/remove',{id:id},'Ученик убран');},
 
   payHistory:function(){var ps=S.data.payments||[];openSheet('<h3>История оплат</h3><div class="group" style="margin-top:14px">'+ps.map(payHist).join('')+'</div>'+'<div class="row"><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>');},
-  // «Получил оплату»: за сколько уроков (1 / абонемент / 2 абонемента / другое), сумма считается сама и правится,
+  // «Внести оплату»: за сколько уроков (1 / абонемент / 2 абонемента / другое), сумма считается сама и правится,
   // сразу видно, что станет с остатком. «Начальный остаток» — тихой ссылкой, только пока у ученика не было оплат.
   // С главной кнопки: ученик подставлен сам (урок сегодня и ждём оплату) — остаётся «Записать». Иначе — «От кого?».
   payStart:function(){var d=S.data;if(!d.students.length){A.invite();return;}
     var f=payOrder()[0];if(d.students.length===1||(f.today_at&&isDue(f)))A.pay(f.id,true);else A.payWho(false);},
   payWho:function(all){var o=payOrder(),top=o.filter(function(s){return s.today_at||isDue(s);}),list=all||!top.length?o:top.slice(0,6);
-    var h='<h3>Получил оплату</h3><div class="m">От кого?</div>';
+    var h='<h3>Внести оплату</h3><div class="m">От кого?</div>';
     if(list.length>8)h+='<div style="margin-top:14px">'+searchBox('pq','Найти ученика')+'</div>';
     h+='<div class="grp group" style="margin-top:14px">'+list.map(payRow).join('')+'</div>';
     if(list.length<o.length)h+='<div class="row" style="margin-top:0"><button class="textbtn" onclick="A.payWho(true)">Все ученики ('+o.length+')</button></div>';
     openSheet(h+'<div class="row"><button class="btn mute" onclick="closeSheetX()">Отмена</button></div>');},
   pay:function(id,pick){var s=stu(id),set=S.data.settings;if(!s)return;S.pay={id:id,n:set.pack_size,kind:'pay',own:false};
-    var h='<h3 id="payTitle">Получил оплату</h3>';
+    var h='<h3 id="payTitle">Внести оплату</h3>';
     if(pick&&S.data.students.length>1)h+='<div class="group" style="margin-top:12px"><button class="card" onclick="A.payWho(false)"><span class="n"><b>'+esc(s.name)+'</b><span>'+payWhen(s)+' · '+balText(s.left,s.paid,s.used)+'</span></span><span class="r" style="color:var(--tint)">Другой</span></button></div>';
     else h+='<div class="m">'+esc(s.name)+' · '+balText(s.left,s.paid,s.used)+'</div>';
-    h+='<label>За сколько уроков</label><div class="opts" data-name="pn">'+payPresets(set).map(function(n){return '<button type="button" aria-pressed="'+(n===set.pack_size)+'" data-v="'+n+'" onclick="A.payN(this)">'+n+'</button>';}).join('')+'<button type="button" aria-pressed="false" data-v="x" onclick="A.payN(this)">Другое</button></div>';
+    h+='<label id="pnLbl">За сколько уроков</label><div class="opts" data-name="pn">'+payPresets(set).map(function(n){return '<button type="button" aria-pressed="'+(n===set.pack_size)+'" data-v="'+n+'" onclick="A.payN(this)">'+n+'</button>';}).join('')+'<button type="button" aria-pressed="false" data-v="x" onclick="A.payN(this)">Другое</button></div>';
     h+='<div id="pnBox" style="display:none;margin-top:10px"><input type="number" inputmode="numeric" id="pn" min="1" max="100" placeholder="Число уроков" aria-label="Число уроков" oninput="A.payUpd()"></div>';
     h+='<div id="pamt"><label for="pa">Сумма, zł</label><input type="number" inputmode="numeric" id="pa" min="0" placeholder="необязательно" oninput="A.payOwn()"></div>';
     h+='<div class="infobox" id="pres"></div>';
@@ -623,8 +633,9 @@ var A={
     var ok=P.n>=1&&P.n<=100;
     if(!P.own)pa.value=ok&&!ini?(priceFor(set,P.n)||''):'';
     var amt=ini?0:Math.max(Math.round(+pa.value)||0,0);
-    document.getElementById('payTitle').textContent=ini?'Начальный остаток':'Получил оплату';
+    document.getElementById('payTitle').textContent=ini?'Начальный остаток':'Внести оплату';
     document.getElementById('pamt').style.display=ini?'none':'';
+    document.getElementById('pnLbl').textContent=ini?'Сколько оплаченных уроков осталось':'За сколько уроков';
     var k=document.getElementById('pkind');if(k)k.textContent=ini?'Нет, это новая оплата':'Уроки оплачены ещё до SlotMate?';
     var left=s.left+(ok?P.n:0),res=left>0?'осталось '+lw(left):left===0?(s.left<0?'долг закрыт':'0 уроков'):'долг '+lw(-left);
     document.getElementById('pres').innerHTML=!ok?'Укажите, за сколько уроков.':ini?'Сколько оплаченных уроков у ученика было до SlotMate. После этого — <b>'+res+'</b>. Ученику сообщение не придёт.':'После этого — <b>'+res+'</b>. Ученику придёт подтверждение.';
@@ -649,14 +660,17 @@ var A={
 
   settings:function(){var d=S.data,h='<h3>Настройки</h3>';
     if(d.is_teacher&&S.mode==='t'){var st=d.settings;
-      h+='<div class="sect">Абонемент</div><div class="two"><div><label for="sps">Уроков</label><input type="number" inputmode="numeric" id="sps" min="1" value="'+st.pack_size+'"></div><div><label for="spp">Цена, zł</label><input type="number" inputmode="numeric" id="spp" min="0" value="'+(st.pack_price||'')+'"></div></div><div class="hint">Подставляется, когда вы отмечаете оплату. Ученик может оплатить и 1 урок, и 8 — сумма посчитается по цене урока, её можно поправить.</div>';
+      h+='<div class="sect">Абонемент</div><div class="two"><div><label for="sps">Уроков</label><input type="number" inputmode="numeric" id="sps" min="1" value="'+st.pack_size+'" oninput="A.perLesson()" onchange="A.saveSettings()"></div><div><label for="spp">Цена, zł</label><input type="number" inputmode="numeric" id="spp" min="0" value="'+(st.pack_price||'')+'" oninput="A.perLesson()" onchange="A.saveSettings()"></div></div><div class="hint" id="perL"></div><div class="hint">Подставляется, когда вы вносите оплату. Ученик может оплатить и 1 урок, и 8 — сумма посчитается по цене урока, её можно поправить.</div>';
       h+='<label>Длительность урока по умолчанию</label>'+opts('sdur',[[45,'45 мин'],[60,'60 мин'],[90,'90 мин']],st.default_duration);
       h+='<label>Ученик отменил поздно — списать?</label>'+opts('slate',[[0,'Нет'],[6,'< 6 ч'],[12,'< 12 ч'],[24,'< 24 ч']],st.late_hours)+'<div class="hint">Если ученик сам отменит урок позже этого срока, урок спишется. Вы всегда отменяете без списания.</div>';
-      h+='<div class="row"><button class="btn" onclick="A.saveSettings()">Сохранить</button></div>';}
+      h+='<div class="hint">Изменения сохраняются сами.</div>';}
     h+='<div class="sect">Календарь телефона</div><div class="m">Подпишитесь один раз — уроки и переносы будут появляться в календаре сами.</div><div class="row"><button class="btn sec" onclick="A.calendar()">Получить ссылку</button></div>';
     if(d.is_admin&&!S.demo)h+='<div class="sect">Владелец</div><div class="row"><button class="btn sec" onclick="A.teacherInvite()">Ссылка для нового учителя</button></div><div class="row"><button class="btn sec" onclick="A.demo()">Кабинет учителя (демо)</button></div>';
-    openSheet(h+'<div class="row"><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>');},
-  saveSettings:function(){act('settings',{pack_size:+document.getElementById('sps').value,pack_price:+document.getElementById('spp').value||0,default_duration:+optVal('sdur'),late_hours:+optVal('slate')},'Сохранено');},
+    openSheet(h+'<div class="row"><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>');if(document.getElementById('perL'))A.perLesson();},
+  perLesson:function(){var n=+document.getElementById('sps').value,p=+document.getElementById('spp').value||0;document.getElementById('perL').textContent=n>=1&&p?'1 урок = '+priceFor({pack_size:n,pack_price:p},1)+' zł':'';},
+  // Настройки сохраняются сами — при каждом изменении, окно не закрывается.
+  saveSettings:function(){var n=+document.getElementById('sps').value;if(!(n>=1))return;
+    api('settings',{pack_size:n,pack_price:+document.getElementById('spp').value||0,default_duration:+optVal('sdur'),late_hours:+optVal('slate')}).then(function(){toast('Сохранено');load();}).catch(function(){});},
   calendar:function(){api('calendar').then(function(r){S.calLink=r.link;openSheet('<h3>Календарь телефона</h3><div class="m">Это ваша личная ссылка, никому её не пересылайте.</div><div class="link">'+esc(r.link)+'</div><div class="row"><button class="btn" onclick="A.copyCal()">Скопировать</button></div><div class="m" style="margin-top:14px"><b>iPhone:</b> Настройки → Приложения → Календарь → Учётные записи → Добавить → Другое → Подписной календарь → вставьте ссылку.<br><br><b>Google Календарь:</b> на компьютере «Другие календари» → «+» → «Добавить по URL». Google обновляет такие календари с задержкой до суток.</div><div class="row"><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>');}).catch(function(){});},
   copyCal:function(){copyText(S.calLink);},
   invite:function(){api('invite').then(function(r){share(r.link,'Записывайтесь ко мне на уроки через SlotMate — откройте ссылку в Телеграме:');}).catch(function(){});},

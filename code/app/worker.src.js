@@ -480,8 +480,8 @@ async function handleCallback(cq, env, origin) {
           note = 'Оплата отменена';
         }
       } else if (p[0] === 'pl') {
-        await edit(env, cq, 'Хорошо. Когда ученик оплатит — откройте урок или карточку ученика в приложении и нажмите «Получил оплату».', appButton(origin, 'Открыть урок', `l=${Number(p[1])}`));
-        note = 'Пока не оплатил';
+        await edit(env, cq, 'Хорошо. Когда ученик оплатит — нажмите «Внести оплату» в приложении.', appButton(origin, 'Открыть урок', `l=${Number(p[1])}`));
+        note = 'Пока не оплачено';
       } else if (p[0] === 'ca' || p[0] === 'cr') {
         const r = await answerClaim(env, user, Number(p[1]), p[0] === 'ca', origin, cq);
         note = r.error || r.note || '';
@@ -920,7 +920,7 @@ async function meData(env, user, body) {
     const set = await settingsOf(env, user.tg_id);
     out.settings = set;
     const { results: st } = await env.DB.prepare(
-      `SELECT s.id, u.name,
+      `SELECT s.id, u.name, u.username,
         (SELECT MIN(starts_at) FROM lessons l WHERE l.student_id = s.id AND l.status IN ('scheduled', 'pending') AND l.starts_at >= ?) AS next,
         (SELECT MIN(starts_at) FROM lessons l WHERE l.student_id = s.id AND l.status IN ('scheduled', 'pending', 'late') AND substr(l.starts_at, 1, 10) = ?) AS today_at,
         (SELECT COALESCE(SUM(lessons), 0) FROM payments p WHERE p.student_id = s.id) AS paid,
@@ -1034,11 +1034,11 @@ async function payAsk(env, l, set, origin) {
   opts.push({ text: 'Другое…', web_app: { url: appUrl(origin, `s=${l.student_id}&pay=1`) } });
   return {
     text: `Сегодня в <b>${l.starts_at.slice(11, 16)}</b> — ${esc(l.student_name)}. ${none ? 'Оплаты ещё не было.' : 'Оплаченные уроки закончились.'}${debt}\nПолучили оплату? Нажмите, за сколько уроков:`,
-    markup: { inline_keyboard: [opts.slice(0, 2), opts.slice(2), [{ text: 'Пока не оплатил', callback_data: `pl:${l.id}` }]] },
+    markup: { inline_keyboard: [opts.slice(0, 2), opts.slice(2), [{ text: 'Пока не оплачено', callback_data: `pl:${l.id}` }]] },
   };
 }
 
-// «Получил оплату» кнопкой в сообщении бота: за сколько уроков — выбрал учитель, сумма по цене урока.
+// «Внести оплату» кнопкой в сообщении бота: за сколько уроков — выбрал учитель, сумма по цене урока.
 async function payForLesson(env, user, lid, origin, lessons = 0) {
   const l = await loadLesson(env, lid);
   if (!l || l.teacher_id !== user.tg_id) return { error: 'Только для учителя' };
@@ -1061,7 +1061,7 @@ async function claimPayment(env, user, subId, lessons, amount, origin) {
   const res = await env.DB.prepare('INSERT INTO pay_claims (teacher_id, student_id, lessons, amount) VALUES (?, ?, ?, ?)').bind(st.teacher_id, st.id, n, sum).run();
   const cid = res.meta.last_row_id;
   const m = await send(env, st.teacher_id, `${esc(user.name)} пишет, что оплатил: <b>${lessonsWord(n)}${sum ? ` · ${sum} zł` : ''}</b>. Деньги получили?`, { inline_keyboard: [
-    [{ text: 'Получил', callback_data: `ca:${cid}` }, { text: 'Не получал', callback_data: `cr:${cid}` }],
+    [{ text: 'Деньги получены', callback_data: `ca:${cid}` }, { text: 'Не получены', callback_data: `cr:${cid}` }],
   ] });
   if (m && m.ok) await env.DB.prepare('UPDATE pay_claims SET msg_chat = ?, msg_id = ? WHERE id = ?').bind(st.teacher_id, m.result.message_id, cid).run();
   return { ok: true };
