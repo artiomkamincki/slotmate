@@ -463,7 +463,7 @@ async function handleCallback(cq, env, origin) {
         await edit(env, cq, r.error || r.msg);
         note = r.error || 'Оплата записана';
       } else if (p[0] === 'pl') {
-        await edit(env, cq, 'Хорошо. Когда ученик оплатит — откройте урок в приложении и нажмите «Оплатил».', appButton(origin, 'Открыть урок', `l=${Number(p[1])}`));
+        await edit(env, cq, 'Хорошо. Когда ученик оплатит — откройте урок в приложении и нажмите «Получил оплату».', appButton(origin, 'Открыть урок', `l=${Number(p[1])}`));
         note = 'Позже';
       } else if (p[0] === 'ca' || p[0] === 'cr') {
         const r = await answerClaim(env, user, Number(p[1]), p[0] === 'ca', origin, cq);
@@ -820,7 +820,7 @@ async function handleApi(request, env, url) {
         const b = await balanceOf(env, st.id);
         if (b.left > 0) continue;
         const price = set.pack_price ? ` Абонемент: ${lessonsWord(set.pack_size)} — ${set.pack_price} zł.` : '';
-        await send(env, st.tg_id, `Напоминание об оплате: оплаченные уроки закончились${b.left < 0 ? ` (в долг: ${lessonsWord(-b.left)})` : ''}.${price} Учитель: ${esc(user.name)}.`);
+        await send(env, st.tg_id, `Напоминание об оплате: ${!b.paid && !b.used ? 'оплаты за уроки ещё не было' : 'оплаченные уроки закончились'}${b.left < 0 ? ` (в долг: ${lessonsWord(-b.left)})` : ''}.${price} Учитель: ${esc(user.name)}.`);
         sent++;
       }
       r = { ok: true, sent }; break;
@@ -907,7 +907,11 @@ async function meData(env, user, body) {
     out.busy = own.map((b) => ({ id: b.id, day: b.day, from_t: b.from_t, to_t: b.to_t, note: b.note }));
     const monthStart = `${today.slice(0, 7)}-01`;
     const m = await env.DB.prepare('SELECT COALESCE(SUM(amount), 0) AS got, COUNT(*) AS n FROM payments WHERE teacher_id = ? AND created_at >= ?').bind(user.tg_id, monthStart).first();
-    const due = out.students.filter((s) => s.left <= 0 && (s.paid || s.used)).length;
+    // Ждём оплату: уроки закончились — или оплат ещё не было, а урок уже назначен
+    // (если учитель ведёт оплаты в приложении: указал цену или уже вносил оплату).
+    const usesPay = !!(set.pack_price || (await env.DB.prepare('SELECT 1 FROM payments WHERE teacher_id = ? LIMIT 1').bind(user.tg_id).first()));
+    for (const s of out.students) s.due = s.left <= 0 && !!(s.paid || s.used || (usesPay && s.next));
+    const due = out.students.filter((s) => s.due).length;
     out.month = { got: Number(m.got), due_count: due, due_sum: due * set.pack_price };
     const { results: pays } = await env.DB.prepare(
       `SELECT p.id, p.student_id, p.lessons, p.amount, p.kind, p.created_at, u.name FROM payments p JOIN students s ON s.id = p.student_id JOIN users u ON u.tg_id = s.tg_id
@@ -966,7 +970,7 @@ async function lessonCovered(env, l) {
 
 function packText(set) { return `${lessonsWord(set.pack_size)}${set.pack_price ? ` · ${set.pack_price} zł` : ''}`; }
 
-// «Оплатил» в уроке (кнопка в Телеграме или в приложении): абонемент по настройкам учителя, одним нажатием.
+// «Получил оплату» в уроке (кнопка в Телеграме или в приложении): абонемент по настройкам учителя, одним нажатием.
 async function payForLesson(env, user, lid, origin) {
   const l = await loadLesson(env, lid);
   if (!l || l.teacher_id !== user.tg_id) return { error: 'Только для учителя' };
@@ -1085,8 +1089,6 @@ async function seedDemo(env) {
   // Прошедший урок Олы с открытым вопросом
   const o = await env.DB.prepare("SELECT id FROM lessons WHERE student_id = ? AND starts_at < ? ORDER BY starts_at DESC LIMIT 1").bind(await sidOf(0), now).first();
   if (o) await env.DB.prepare("UPDATE lessons SET reminder_answer = 'no', check_needed = 1 WHERE id = ?").bind(o.id).run();
-  // Зося нажала «Я оплатил» — ждёт подтверждения учителя
-  await env.DB.prepare('INSERT INTO pay_claims (teacher_id, student_id, lessons, amount) VALUES (?, ?, 4, 600)').bind(DEMO_T, await sidOf(4)).run();
   // Концерт в день ближайшего урока Томека
   const t = await next(3);
   await env.DB.prepare("INSERT INTO busy (teacher_id, day, from_t, to_t, note) VALUES (?, ?, '17:00', '23:00', 'Концерт')").bind(DEMO_T, t.starts_at.slice(0, 10)).run();
@@ -1135,7 +1137,9 @@ async function freeSlots(env, user, body) {
     }
   }
   cands.sort((a, b) => a.score - b.score);
-  return { slots: cands.slice(0, Number(body.limit) || 6).map((c) => c.ts) };
+  // Выбираем самые близкие к обычному времени, а показываем по порядку дат.
+  const top = cands.slice(0, Number(body.limit) || 6).map((c) => c.ts);
+  return { slots: top.slice().sort(), best: top[0] || null };
 }
 
 // Продлить серию на 12 недель. auto — дальше продлевать самим (без вопросов);
@@ -1316,7 +1320,7 @@ async function runHourly(env, origin) {
   });
 
   await step('pay-reminders', async () => {
-  // 5. За 3 часа до урока: если оплаченные уроки закончились — учителю кнопка «Оплатил» (одно нажатие).
+  // 5. За 3 часа до урока: если оплаченные уроки закончились — учителю кнопка «Получил оплату» (одно нажатие).
   const { results: due } = await env.DB.prepare(`${LESSON_SELECT} WHERE l.pay_asked = 0 AND l.teacher_id > 0 AND l.status IN ${ACTIVE} AND COALESCE(l.reminder_answer, '') != 'no' AND l.starts_at > ? AND l.starts_at <= ? ORDER BY l.starts_at`)
     .bind(now, nowLocal(3 * 3600 * 1000)).all();
   for (const l of due) {
@@ -1328,8 +1332,9 @@ async function runHourly(env, origin) {
     if (await lessonCovered(env, l)) continue;
     const b = await balanceOf(env, l.student_id);
     const debt = b.left < 0 ? ` Долг: ${lessonsWord(-b.left)}.` : '';
-    await send(env, l.teacher_id, `Сегодня в <b>${l.starts_at.slice(11, 16)}</b> — ${esc(l.student_name)}. Оплаченные уроки закончились.${debt}\nЖдём оплату: ${packText(set)}.`, { inline_keyboard: [
-      [{ text: `Оплатил · ${packText(set)}`, callback_data: `pd:${l.id}` }],
+    const none = !b.paid && !b.used;
+    await send(env, l.teacher_id, `Сегодня в <b>${l.starts_at.slice(11, 16)}</b> — ${esc(l.student_name)}. ${none ? 'Оплаты ещё не было.' : 'Оплаченные уроки закончились.'}${debt}\nЖдём оплату: ${packText(set)}.`, { inline_keyboard: [
+      [{ text: `Получил оплату · ${packText(set)}`, callback_data: `pd:${l.id}` }],
       [{ text: 'Позже', callback_data: `pl:${l.id}` }],
     ] });
   }

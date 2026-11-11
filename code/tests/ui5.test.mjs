@@ -43,7 +43,7 @@ for (let i = 0; i < extra.length; i++) await msg({ id: 900 + i, first_name: extr
 r = await api(PAV, 'me'); const all = r.j.students;
 for (let i = 0; i < extra.length; i++) { const s = all.find((x) => x.name === extra[i]); if (i % 3) await api(PAV, 'pay/add', { student_id: s.id, lessons: 4, amount: 600 });
   for (let j = 0; j <= i % 4; j++) db.prepare('INSERT INTO lessons (teacher_id, student_id, starts_at) VALUES (?, ?, ?)').run(333, s.id, `${day(-3 - j * 7)} ${9 + i}:00`); }
-// Томек: долг, следующий урок — во вторник (на нём учитель видит «Оплатил»)
+// Томек: долг, следующий урок — во вторник (на нём учитель видит «Получил оплату»)
 await api(PAV, 'lesson/add', { student_id: all.find((x) => x.name === 'Томек').id, starts_at: `${d(1)} 12:00`, auto: true });
 
 
@@ -105,11 +105,10 @@ await shot(S, '17-student-home');
 await S.click('.card >> nth=0'); await S.waitForTimeout(500); await shot(S, '18-student-lesson');
 await S.click('text=Отменить урок'); await shot(S, '19-cancel-series');
 await bg(S);
-// v6: «Я оплатил» у ученика → у учителя в «Нужно ваше решение»
-await S.click('.big >> text=Я оплатил'); await shot(S, '20-student-claim-sheet');
-await S.click('#claimSave'); await S.waitForTimeout(500); await shot(S, '21-student-claim-wait');
-const T2 = await page(PAV); await shot(T2, '22-teacher-claim-inbox');
-// v6: урок, где ждём оплату, — кнопка «Оплатил» в одно нажатие
+// «Оплатить» у ученика — пока муляж: «Оплата пока недоступна»
+await S.click('.big >> text=Оплатить'); await shot(S, '20-student-pay-soon');
+const T2 = await page(PAV);
+// v6: урок, где ждём оплату, — кнопка «Получил оплату» в одно нажатие
 await T2.click('[aria-label="Следующая неделя"]'); await T2.waitForTimeout(300);
 await T2.click('.day .card:has-text("Томек") >> nth=0'); await T2.waitForTimeout(500); await shot(T2, '23-teacher-pay-lesson');
 await bg(T2); await T2.click('.fab >> text=+ Урок'); await shot(T2, '24-add-lesson-weekly');

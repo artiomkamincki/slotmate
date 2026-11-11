@@ -28,6 +28,7 @@ expect(ola1.later === 11 && ola1.series_end && ola1.duration === 90, `series inf
 // свободные окна
 r = await api(PAV, 'slots', { lesson_id: ola1.id });
 expect(r.j.slots.length === 6 && !r.j.slots.includes(`${D3} 16:30`) && !r.j.slots.includes(`${D3} 15:00`), 'slots exclude taken: ' + r.j.slots.join(', '));
+expect(r.j.slots.join() === r.j.slots.slice().sort().join() && r.j.slots.includes(r.j.best), 'slots go in date order, best is one of them');
 r = await api(OLA, 'slots', { lesson_id: ola1.id });
 expect(r.j.slots.length > 0, 'student gets slots too');
 r = await api(MAR, 'slots', { lesson_id: ola1.id });
