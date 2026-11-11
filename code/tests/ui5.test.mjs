@@ -84,22 +84,22 @@ await T.click('text=Отправить предложения'); await T.waitFor
 await shot(T, '06-move-all-result');
 await T.click('#sheet >> text=Выбрать другое время'); await T.waitForTimeout(700); await shot(T, '07-retry');
 await bg(T);
+// Ученики и оплаты — одна вкладка
 await T.click('role=tab[name=/Ученики/]'); await shot(T, '08-students');
+await T.screenshot({ path: `${SCREENS}08b-students-full.png`, fullPage: true });
+await T.fill('#sq', 'ма'); await T.waitForTimeout(200); await shot(T, '08c-students-search');
+await T.fill('#sq', ''); await T.waitForTimeout(200);
 await T.click('.card:has-text("Ола") >> nth=0'); await shot(T, '09-student-card');
 await bg(T);
-await T.click('role=tab[name=/Оплаты/]'); await shot(T, '10-payments');
-await T.screenshot({ path: `${SCREENS}10b-payments-full.png`, fullPage: true });
-await T.fill('#pq', 'ма'); await T.waitForTimeout(200); await shot(T, '10c-payments-search');
-await T.fill('#pq', '');
-await T.click('.fab >> text=Внести оплату'); await shot(T, '11-pay-picker');
-await T.click('#sheet .card:has-text("Марек")'); await shot(T, '12-pay-sheet');
-await T.click('#paySave'); await T.waitForTimeout(400); await shot(T, '13-pay-toast');
-await T.click('role=tab[name=/Неделя/]'); await T.click('.fab >> text=+ Урок');
+// Марек ждёт оплату: в карточке «Получил оплату» — одно нажатие
+await T.click('.card:has-text("Марек") >> nth=0'); await shot(T, '12-student-card-due');
+await T.click('#payS'); await T.waitForTimeout(400); await shot(T, '13-pay-toast');
+await T.click('role=tab[name=/Расписание/]'); await T.click('.fab >> text=+ Урок');
 await T.selectOption('#als', String(sid['Кася'])); await T.fill('#ald', d(0)); await T.fill('#alt', '17:30');
 await T.click('#sheet >> text=Добавить'); await T.waitForTimeout(400); await shot(T, '14-add-conflict');
 await bg(T); await T.click('[aria-label="Настройки"]'); await shot(T, '15-settings'); await bg(T);
 const D = await page(PAV, 'dark'); await shot(D, '16-dark-week');
-await D.click('role=tab[name=/Оплаты/]'); await shot(D, '16b-dark-pay');
+await D.click('role=tab[name=/Ученики/]'); await shot(D, '16b-dark-students');
 const S = await page(OWN);
 await shot(S, '17-student-home');
 await S.click('.card >> nth=0'); await S.waitForTimeout(500); await shot(S, '18-student-lesson');

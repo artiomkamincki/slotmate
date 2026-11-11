@@ -42,6 +42,8 @@ h1{font-size:34px;line-height:41px;margin:0;font-weight:700;letter-spacing:.01em
 .dayh,.sect{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:13px;font-weight:400;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;padding:0 16px 7px}
 .dayh .today{color:var(--tint);font-weight:600}
 .sect{margin-top:28px}
+.sect.hl{display:flex;justify-content:space-between;align-items:flex-end}
+.sect.hl .textbtn{min-height:0;padding:0;font-size:15px;text-transform:none;letter-spacing:0}
 .sect.tog{width:100%;min-height:36px;margin-top:22px;align-items:flex-end}
 .sect.tog span:last-child{color:var(--tint);text-transform:none;font-size:15px;letter-spacing:0}
 .free{font-size:17px;color:var(--muted);padding:11px 16px;position:relative}
@@ -158,7 +160,7 @@ if(tg){tg.ready();tg.expand();if(tg.onEvent)tg.onEvent('themeChanged',theme);}
 var BB=tg&&tg.BackButton&&tg.isVersionAtLeast&&tg.isVersionAtLeast('6.1')?tg.BackButton:null;
 
 var Q=new URLSearchParams(location.search);
-var S={data:null,mode:'',tab:Q.get('tab')||'week',weekStart:null,deep:true,restOpen:false};
+var S={data:null,mode:'',tab:Q.get('tab')==='pay'?'students':(Q.get('tab')||'week'),weekStart:null,deep:true};
 var WD=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 var WDF=['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
 var MON=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
@@ -248,18 +250,17 @@ function render(){
   }
   var asT=S.mode==='t';
   if(S.demo)h+='<div class="demo"><span>Демо · никому не отправляется</span><button onclick="A.demoReset()">Сбросить</button><button onclick="A.demoExit()">Выйти</button></div>';
-  var title=asT?(S.tab==='week'?'Расписание':S.tab==='students'?'Ученики':'Оплаты'):'Мои уроки';
+  var title=asT?(S.tab==='week'?'Расписание':'Ученики'):'Мои уроки';
   h+='<div class="head"><div><h1>'+title+'</h1><div class="sub">'+(asT?esc(d.name)+' · учитель':studentSub())+'</div></div><div style="display:flex">'+(asT?'':'<button class="icon" aria-label="Как это работает" onclick="A.help()">?</button>')+'<button class="icon" aria-label="Настройки" onclick="A.settings()">'+GEAR+'</button></div></div>';
   if(d.is_teacher&&d.is_student&&!S.demo)h+='<div class="seg" role="tablist"><button role="tab" aria-selected="'+asT+'" onclick="A.mode(\'t\')">Я учитель</button><button role="tab" aria-selected="'+!asT+'" onclick="A.mode(\'s\')">Я ученик</button></div>';
   if(asT){
     var nIn=inboxCount();
     var due=d.students.filter(isDue).length;
-    h+='<div class="seg tabs" role="tablist"><button role="tab" aria-selected="'+(S.tab==='week')+'" onclick="A.tab(\'week\')">Неделя'+(nIn?'<span class="badge">'+nIn+'</span>':'')+'</button><button role="tab" aria-selected="'+(S.tab==='students')+'" onclick="A.tab(\'students\')">Ученики</button><button role="tab" aria-selected="'+(S.tab==='pay')+'" onclick="A.tab(\'pay\')">Оплаты'+(due?'<span class="badge">'+due+'</span>':'')+'</button></div>';
-    h+=S.tab==='week'?renderInbox()+renderWeek():S.tab==='students'?renderStudents():renderPay();
+    h+='<div class="seg tabs" role="tablist"><button role="tab" aria-selected="'+(S.tab==='week')+'" onclick="A.tab(\'week\')">Расписание'+(nIn?'<span class="badge">'+nIn+'</span>':'')+'</button><button role="tab" aria-selected="'+(S.tab!=='week')+'" onclick="A.tab(\'students\')">Ученики'+(due?'<span class="badge">'+due+'</span>':'')+'</button></div>';
+    h+=S.tab==='week'?renderInbox()+renderWeek():renderStudents();
     fab.style.display='flex';
     if(S.tab==='week')fab.innerHTML='<button class="btn" onclick="A.addLesson()">+ Урок</button><button class="btn sec" onclick="A.busy()">Я занят</button>';
-    else if(S.tab==='students')fab.innerHTML='<button class="btn" onclick="A.invite()">Пригласить ученика</button>';
-    else fab.innerHTML='<button class="btn" onclick="A.payPick()">Внести оплату</button>'+(due?'<button class="btn sec" onclick="A.remindAll()">Напомнить ('+due+')</button>':'');
+    else fab.innerHTML='<button class="btn" onclick="A.invite()">Пригласить ученика</button>';
   }else{
     h+=renderStudent();
     fab.style.display='none';
@@ -289,12 +290,13 @@ function renderWeek(){
   var d=S.data,ws=S.weekStart,h='';
   var cur=monday(today())===ws;
   h+='<div class="weeknav"><button class="icon" aria-label="Прошлая неделя" onclick="A.week(-1)">‹</button><b>'+weekTitle(ws)+'</b>'+(cur?'':'<button class="textbtn" onclick="A.week(0)">Сегодня</button>')+'<button class="icon" aria-label="Следующая неделя" onclick="A.week(1)">›</button></div>';
-  var mine=d.lessons.filter(function(l){return l.is_teaching;});
+  var mine=d.lessons.filter(function(l){return l.is_teaching;}),shown=0;
   for(var i=0;i<7;i++){
     var ymd=addDays(ws,i);
     var ls=mine.filter(function(l){return l.starts_at.slice(0,10)===ymd;});
     var bs=d.busy.filter(function(b){return b.day===ymd;});
-    if(ymd<today()&&!ls.length)continue;
+    if(!ls.length&&!bs.length&&ymd!==today())continue;
+    shown++;
     h+='<div class="day"><div class="dayh"><span>'+WDF[wd(ymd)]+', '+dm(ymd)+'</span>'+(ymd===today()?'<span class="today">сегодня</span>':'')+'</div><div class="group">';
     bs.forEach(function(b){var span=b.from_t==='00:00'&&b.to_t==='23:59'?'весь день':b.from_t+'–'+b.to_t,aff=busyAffected(b);
       h+='<div class="busy"><span>'+esc(b.note||'Занят')+' · '+span+'</span>'+(aff.length?'<button class="mv" onclick="A.moveBusy('+b.id+')">Перенести уроки ('+aff.length+')</button>':'')+'<button class="x" aria-label="Убрать отметку «'+esc(b.note||'Занят')+'»" onclick="A.unbusy('+b.id+')">✕</button></div>';});
@@ -303,40 +305,32 @@ function renderWeek(){
       h+='<button class="card'+(l.past||l.status==='late'?' past':'')+'" onclick="A.lesson('+l.id+')"><span class="t">'+l.starts_at.slice(11,16)+'</span><span class="n"><b>'+esc(l.student_name)+'</b>'+(st.note?'<span>'+esc(st.note)+'</span>':'')+'</span>'+st.chip+'</button>';});
     h+='</div></div>';
   }
+  if(!shown&&d.students.length)h+='<div class="lead" style="margin-top:16px">На этой неделе уроков нет.</div>';
   if(!d.students.length)h+='<div class="lead" style="margin-top:16px">Пока нет учеников. Откройте вкладку «Ученики» и отправьте ссылку-приглашение.</div>';
   return h;
 }
 function searchBox(id,ph){return '<input class="search" type="search" id="'+id+'" placeholder="'+ph+'" oninput="A.filter(this)" autocomplete="off">';}
+// Ученики и оплаты — один список: сверху сводка, дальше «Ждём оплату», «Остался 1 урок», остальные.
+function stuRow(s){return '<button class="card" data-n="'+esc(s.name.toLowerCase())+'" onclick="A.student('+s.id+')"><span class="n"><b>'+esc(s.name)+'</b><span>'+(s.next?'следующий: '+fmtShort(s.next):'уроков впереди нет')+'</span></span>'+balShort(s)+'</button>';}
 function renderStudents(){
-  var d=S.data,h='';
-  if(!d.students.length)return '<div class="lead">Пока нет учеников.<br><br>Нажмите «Пригласить ученика» и отправьте ссылку в Телеграме. Кто откроет ссылку, появится здесь, а вам придёт сообщение.</div>';
-  if(d.students.length>8)h+=searchBox('sq','Найти ученика');
-  h+='<div class="grp group">';
-  d.students.forEach(function(s){
-    h+='<button class="card" data-n="'+esc(s.name.toLowerCase())+'" onclick="A.student('+s.id+')"><span class="n"><b>'+esc(s.name)+'</b><span>'+(s.next?'следующий: '+fmtShort(s.next):'уроков впереди нет')+'</span></span>'+balShort(s)+'</button>';});
-  return h+'</div>';
-}
-function payRow(s){return '<button class="card" data-n="'+esc(s.name.toLowerCase())+'" onclick="A.payStudent('+s.id+')"><span class="n"><b>'+esc(s.name)+'</b></span>'+balShort(s)+'</button>';}
-function payHist(p){var dt=String(p.created_at).slice(0,10);return '<div class="card"><span class="n"><b>'+esc(p.name)+' · '+lw(p.lessons)+(p.amount?' · '+p.amount+' zł':'')+'</b><span>'+(p.kind==='initial'?'начальный остаток · ':'')+(/^\d{4}-\d\d-\d\d$/.test(dt)?dm(dt):'')+'</span></span><button class="btn dghost sm" style="flex:0;padding:0 4px" onclick="A.payUndoAsk('+p.id+')">Отменить</button></div>';}
-function renderPay(){
   var d=S.data,set=d.settings,m=d.month,h='';
-  var mon=MONN[Number(today().slice(5,7))-1];
-  h+='<div class="sum"><div><b>'+m.got+' zł</b><span>получено в '+mon+'</span></div><div><b'+(m.due_count?' style="color:var(--attn)"':'')+'>'+(set.pack_price?m.due_sum+' zł':m.due_count)+'</b><span>ждём от '+m.due_count+' '+plural(m.due_count,'ученика','учеников','учеников')+'</span></div></div>';
-  h+='<div class="pay-sub">Абонемент: '+lw(set.pack_size)+(set.pack_price?' · '+set.pack_price+' zł':' · <button class="textbtn" style="padding:0;min-height:0;text-decoration:underline" onclick="A.settings()">указать цену</button>')+'. Урок списывается, когда прошёл.</div>';
-  if(!d.students.length)return h+'<div class="lead" style="margin-top:16px">Пока нет учеников.</div>';
-  if(d.students.length>8)h+='<div style="margin-top:14px">'+searchBox('pq','Найти ученика')+'</div>';
+  if(!d.students.length)return '<div class="lead">Пока нет учеников.<br><br>Нажмите «Пригласить ученика» и отправьте ссылку в Телеграме. Кто откроет ссылку, появится здесь, а вам придёт сообщение.</div>';
+  if(d.uses_pay){var mon=MONN[Number(today().slice(5,7))-1];
+    h+='<div class="sum"><div><b>'+m.got+' zł</b><span>получено в '+mon+'</span></div><div><b'+(m.due_count?' style="color:var(--attn)"':'')+'>'+(set.pack_price?m.due_sum+' zł':m.due_count)+'</b><span>ждём от '+m.due_count+' '+plural(m.due_count,'ученика','учеников','учеников')+'</span></div></div>';
+    h+='<div class="pay-sub">Абонемент: '+lw(set.pack_size)+(set.pack_price?' · '+set.pack_price+' zł':' · <button class="textbtn" style="padding:0;min-height:0;text-decoration:underline" onclick="A.settings()">указать цену</button>')+'. Урок списывается, когда прошёл.</div>';}
+  if(d.students.length>8)h+='<div style="margin-top:14px">'+searchBox('sq','Найти ученика')+'</div>';
+  if(!d.uses_pay)return h+'<div class="grp group" style="margin-top:14px">'+d.students.map(stuRow).join('')+'</div>';
   var due=[],soon=[],rest=[];
   d.students.forEach(function(s){if(isDue(s))due.push(s);else if(s.left===1)soon.push(s);else rest.push(s);});
   due.sort(function(a,b){return a.left-b.left;});
-  if(due.length)h+='<div class="grp"><div class="sect">Ждём оплату · '+due.length+'</div><div class="group">'+due.map(payRow).join('')+'</div></div>';
-  if(soon.length)h+='<div class="grp"><div class="sect">Остался 1 урок · '+soon.length+'</div><div class="group">'+soon.map(payRow).join('')+'</div></div>';
-  if(rest.length){var open=S.restOpen||(!due.length&&!soon.length);
-    h+='<div class="grp" data-fold="1"><button class="sect tog" onclick="A.toggleRest()" aria-expanded="'+open+'"><span>'+(due.length||soon.length?'Остальные':'Все ученики')+' · '+rest.length+'</span><span>'+(open?'Свернуть':'Показать')+'</span></button><div id="restList" class="group'+(open?'':' hide')+'">'+rest.map(payRow).join('')+'</div></div>';}
+  if(due.length)h+='<div class="grp"><div class="sect hl"><span>Ждём оплату · '+due.length+'</span><button class="textbtn" onclick="A.remindAll()">Напомнить всем</button></div><div class="group">'+due.map(stuRow).join('')+'</div></div>';
+  if(soon.length)h+='<div class="grp"><div class="sect">Остался 1 урок · '+soon.length+'</div><div class="group">'+soon.map(stuRow).join('')+'</div></div>';
+  if(rest.length)h+='<div class="grp"><div class="sect">'+(due.length||soon.length?'Остальные':'Все ученики')+' · '+rest.length+'</div><div class="group">'+rest.map(stuRow).join('')+'</div></div>';
   var ps=d.payments||[];
-  if(ps.length){h+='<div class="sect">Последние оплаты</div><div class="group">'+ps.slice(0,3).map(payHist).join('')+'</div>';
-    if(ps.length>3)h+='<div class="row" style="margin-top:4px"><button class="btn mute" onclick="A.payHistory()">Вся история ('+ps.length+')</button></div>';}
+  if(ps.length)h+='<div class="row" style="margin-top:8px"><button class="btn mute" onclick="A.payHistory()">Все оплаты ('+ps.length+')</button></div>';
   return h;
 }
+function payHist(p){var dt=String(p.created_at).slice(0,10);return '<div class="card"><span class="n"><b>'+esc(p.name)+' · '+lw(p.lessons)+(p.amount?' · '+p.amount+' zł':'')+'</b><span>'+(p.kind==='initial'?'начальный остаток · ':'')+(/^\d{4}-\d\d-\d\d$/.test(dt)?dm(dt):'')+'</span></span><button class="btn dghost sm" style="flex:0;padding:0 4px" onclick="A.payUndoAsk('+p.id+')">Отменить</button></div>';}
 // Экран ученика: когда урок и всё ли оплачено — с одного взгляда. Одна кнопка: «Не смогу прийти».
 function subOf(l){return S.data.my_subs.filter(function(x){return x.id===l.student_id;})[0];}
 function subUses(s){return !!(s&&(s.paid||s.used||s.pack_price));}
@@ -371,7 +365,7 @@ function renderStudent(){
     h+='</div>';
   }
   if(mine.length>1){h+='<div class="sect">Дальше</div><div class="group">';mine.slice(1,9).forEach(function(l){var s2=lessonState(l,false),pm2=payMark(l);
-    var sb=subOf(l),right=s2.chip||(l.paid_ok||!sb||sb.left<=0?'':pm2);
+    var sb=subOf(l),right=s2.chip||(l.paid_ok||(sb&&sb.left>0)?pm2:'');
     h+='<button class="card" onclick="A.lesson('+l.id+')"><span class="t">'+l.starts_at.slice(11,16)+'</span><span class="n"><b>'+fmtDate(l.starts_at.slice(0,10))+'</b>'+(s2.note||manyT?'<span>'+esc(s2.note||l.teacher_name)+'</span>':'')+'</span>'+right+'</button>';});h+='</div>';}
   return h;
 }
@@ -405,9 +399,7 @@ var A={
     A.chk();},
   filter:function(inp){var q=inp.value.trim().toLowerCase();var root=inp.closest('.sheet')||document.getElementById('app');
     Array.prototype.forEach.call(root.querySelectorAll('.card[data-n]'),function(c){c.style.display=!q||c.getAttribute('data-n').indexOf(q)>=0?'':'none';});
-    Array.prototype.forEach.call(root.querySelectorAll('.grp'),function(g){var any=Array.prototype.some.call(g.querySelectorAll('.card[data-n]'),function(c){return c.style.display!=='none';});g.style.display=any?'':'none';
-      if(g.getAttribute('data-fold')){var rl=g.querySelector('#restList'),tg2=g.querySelector('.tog span:last-child');if(rl)rl.classList.toggle('hide',!q&&!S.restOpen);if(tg2)tg2.style.visibility=q?'hidden':'';}});},
-  toggleRest:function(){S.restOpen=!S.restOpen;render();},
+    Array.prototype.forEach.call(root.querySelectorAll('.grp'),function(g){var any=Array.prototype.some.call(g.querySelectorAll('.card[data-n]'),function(c){return c.style.display!=='none';});g.style.display=any?'':'none';});},
   back:function(){if(S.back)S.back();else closeSheet();},
   retry:function(){S.retry&&S.retry();},
   touch:function(){S.touched=true;A.chk();},
@@ -450,15 +442,17 @@ var A={
     if(asT&&l.pay_due){var set=S.data.settings,ps=stu(l.student_id),none=ps&&!ps.paid&&!ps.used,main=!(l.status==='pending'&&lessonState(l,asT).onMe);
       h+='<div class="infobox">'+(none?'Оплаты ещё не было':'Оплаченные уроки закончились')+' — ждём оплату.</div><div class="row"><button class="btn'+(main?'':' sec')+'" id="payL" onclick="A.payLesson('+l.id+')">Получил оплату · '+packText(set)+'</button></div><div class="row" style="margin-top:0"><button class="textbtn" onclick="A.pay('+l.student_id+')">Другая сумма</button></div>';}
     if(hideResched)h+='<div class="row" id="reschedBtn"><button class="btn ghost" onclick="A.showResched()">Предложить другое время</button></div>';
-    h+='<div id="resched"'+(hideResched?' class="hide"':'')+'><label style="margin-top:20px">Перенести на · '+(asT?'ваше свободное время':'свободно у учителя')+'</label>'+slotsBox('rsSlots')+dt('rs',l.starts_at.slice(0,10),l.starts_at.slice(11,16),true);
+    // Перенос: нажал свободное время — предложение ушло ученику. Ручной выбор — под «Другое время…».
+    h+='<div id="resched"'+(hideResched?' class="hide"':'')+'><label style="margin-top:20px">Перенести на · нажмите время</label><div class="m" style="font-size:14px;margin:0 0 8px">Ученик получит предложение с кнопками «Подтвердить» и «Не подходит».</div>'+slotsBox('rsSlots');
+    h+='<div class="row" id="otherBtn" style="margin-top:6px"><button class="textbtn" onclick="A.showOther()">Другое время…</button></div><div id="other" class="hide">'+dt('rs',l.starts_at.slice(0,10),l.starts_at.slice(11,16),true);
     if(l.later>0&&l.series_end)h+='<label>Что переносим</label>'+opts('scope',[['one','Только этот урок'],['series',seriesLabel(l)]],'one');
-    h+='<div class="row"><button class="btn" id="sendBtn" disabled onclick="A.propose('+l.id+')">Предложить перенос</button></div><div class="hint" id="sendHint"></div>';
-    h+='<div class="m" style="font-size:14px">'+(asT?'Ученик':'Учитель')+' получит сообщение с кнопками «Подтвердить» и «Не подходит».</div></div>';
+    h+='<div class="row"><button class="btn" id="sendBtn" disabled onclick="A.propose('+l.id+')">Предложить перенос</button></div><div class="hint" id="sendHint"></div></div></div>';
     if(asT&&!l.series_auto&&seriesSoon(l))h+='<div class="infobox">Регулярные уроки заканчиваются '+dm(l.series_end.slice(0,10))+'.</div><div class="row"><button class="btn sec" onclick="A.extend('+l.series_id+')">Продлевать автоматически</button></div>';
     h+='<div class="row" style="margin-top:20px"><button class="btn dghost" onclick="A.cancel('+l.id+')">Отменить урок</button><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>';
     openSheet(h);A.chk();
-    api('slots',{lesson_id:l.id}).then(function(r){fillSlots('rsSlots','rs',r.slots,A.touch);}).catch(function(){fillSlots('rsSlots','rs',[]);});
+    S.sending=false;api('slots',{lesson_id:l.id}).then(function(r){fillSlots('rsSlots','rs',r.slots,function(){A.proposeQuick(l.id);});}).catch(function(){fillSlots('rsSlots','rs',[]);});
   },
+  showOther:function(){var o=document.getElementById('other'),b=document.getElementById('otherBtn');if(o)o.classList.remove('hide');if(b)b.classList.add('hide');},
   // Шторка урока у ученика: «Не смогу прийти» → нажал свободное время — предложение ушло.
   studentLesson:function(l,afterNo){var id=l.id,sub=subOf(l);
     var h='<h3>'+fmtDate(l.starts_at.slice(0,10))+', '+l.starts_at.slice(11,16)+'–'+endTime(l.starts_at,l.duration)+'</h3><div class="m">Учитель: '+esc(l.teacher_name)+(payMark(l)?' · '+payMark(l):'')+'</div>';
@@ -486,7 +480,7 @@ var A={
       closeSheet();load();toast('Предложено: '+fmtShort(ts)+'. Пока урок на старом времени','Отозвать',function(){act('lesson/withdraw',{id:id},'Предложение отозвано');});
     }).catch(function(){S.sending=false;});},
   propose:function(id){var ts=readTs('rs');if(!ts)return;var sc=optVal('scope')||'one';
-    act('lesson/propose',{id:id,starts_at:ts,scope:sc},'Предложение отправлено',function(){A.lesson(id);setTimeout(function(){A.showResched();setTs('rs',ts);A.touch();},0);});},
+    act('lesson/propose',{id:id,starts_at:ts,scope:sc},'Предложение отправлено',function(){A.lesson(id);setTimeout(function(){A.showResched();A.showOther();setTs('rs',ts);A.touch();},0);});},
   withdraw:function(id){act('lesson/withdraw',{id:id},'Предложение отозвано');},
   answer:function(id,ok){var l=L(id);if(!l)return;
     if(ok)return api('lesson/answer',{id:id,accept:true,code:l.proposed_start}).then(function(){closeSheet();toast('Перенос подтверждён');load();}).catch(function(){closeSheet();load();});
@@ -552,26 +546,25 @@ var A={
     openSheet('<h3>Убрать отметку?</h3><div class="m">'+esc(b.note)+', '+fmtDate(b.day)+'. Уже отправленные предложения переноса останутся.</div><div class="row"><button class="btn sec" onclick="closeSheetX()">Оставить</button><button class="btn danger" onclick="A.unbusyDo('+id+')">Убрать</button></div>');},
   unbusyDo:function(id){act('busy/remove',{id:id},'Отметка убрана');},
 
-  student:function(id){var s=stu(id);if(!s)return;
-    var ls=S.data.lessons.filter(function(l){return l.student_id===id&&l.is_teaching&&!l.past&&l.status!=='late';}).slice(0,4);
-    var h='<h3>'+esc(s.name)+'</h3><div class="m">'+balText(s.left,s.paid,s.used)+'</div><div class="sect">Ближайшие уроки</div>';
+  // Карточка ученика: оплата в одно нажатие, уроки, история оплат.
+  student:function(id){var s=stu(id);if(!s)return;var d=S.data,set=d.settings,due=isDue(s);
+    var ls=d.lessons.filter(function(l){return l.student_id===id&&l.is_teaching&&!l.past&&l.status!=='late';}).slice(0,4);
+    var ps=(d.payments||[]).filter(function(p){return p.student_id===id;});
+    var bal=balText(s.left,s.paid,s.used),col=s.left<0?'var(--bad)':due?'var(--attn)':'';
+    var h='<h3>'+esc(s.name)+'</h3><div class="m">'+(d.uses_pay?'<span'+(col?' style="color:'+col+'"':'')+'>'+bal.charAt(0).toUpperCase()+bal.slice(1)+'</span>':'Ученик')+(s.next?' · следующий '+fmtShort(s.next):'')+'</div>';
+    if(due)h+='<div class="row"><button class="btn" id="payS" onclick="A.payQuick('+id+')">Получил оплату · '+packText(set)+'</button></div><div class="row" style="margin-top:0"><button class="textbtn" onclick="A.pay('+id+')">Другая сумма</button></div>';
+    h+='<div class="row"><button class="btn sec" onclick="A.addLesson('+id+')">+ Урок</button>'+(due?'<button class="btn sec" onclick="A.remind('+id+')">Напомнить</button>':'<button class="btn sec" onclick="A.pay('+id+')">Внести оплату</button>')+'</div>';
+    h+='<div class="sect">Ближайшие уроки</div>';
     if(!ls.length)h+='<div class="m" style="padding:10px 0">Нет запланированных уроков.</div>';
-    if(ls.length)h+='<div class="group">';ls.forEach(function(l){var st=lessonState(l,true);h+='<button class="card" onclick="A.lesson('+l.id+')"><span class="t">'+l.starts_at.slice(11,16)+'</span><span class="n"><b>'+fmtDate(l.starts_at.slice(0,10))+'</b>'+(st.note?'<span>'+esc(st.note)+'</span>':'')+'</span>'+st.chip+'</button>';});if(ls.length)h+='</div>';
-    h+='<div class="row"><button class="btn" onclick="A.addLesson('+id+')">+ Урок</button><button class="btn sec" onclick="A.pay('+id+')">Внести оплату</button></div>';
-    h+='<div class="row"><button class="btn dghost" onclick="A.removeAsk('+id+')">Убрать ученика</button><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>';
+    else h+='<div class="group">'+ls.map(function(l){var st=lessonState(l,true);return '<button class="card" onclick="A.lesson('+l.id+')"><span class="t">'+l.starts_at.slice(11,16)+'</span><span class="n"><b>'+fmtDate(l.starts_at.slice(0,10))+'</b>'+(st.note?'<span>'+esc(st.note)+'</span>':'')+'</span>'+st.chip+'</button>';}).join('')+'</div>';
+    if(ps.length)h+='<div class="sect">Оплаты</div><div class="group">'+ps.slice(0,6).map(payHist).join('')+'</div>';
+    h+='<div class="row" style="margin-top:20px"><button class="btn dghost" onclick="A.removeAsk('+id+')">Убрать ученика</button><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>';
     openSheet(h);},
+  payQuick:function(id){var b=document.getElementById('payS');if(b){if(b.disabled)return;b.disabled=true;}var s=stu(id),set=S.data.settings;
+    api('pay/add',{student_id:id,lessons:set.pack_size,amount:set.pack_price||0,kind:'pay'}).then(function(r){closeSheet();load();toast('Записано: '+first(s.name)+', '+packText(set),'Отменить',function(){api('pay/undo',{id:r.id}).then(function(){toast('Оплата отменена');load();}).catch(function(){});});}).catch(function(){if(b)b.disabled=false;});},
   removeAsk:function(id){var s=stu(id);openSheet('<h3>Убрать ученика?</h3><div class="m">'+esc(s.name)+' пропадёт из списка, его будущие уроки отменятся, ему придёт сообщение. Вернуться он сможет по ссылке-приглашению.</div><div class="row"><button class="btn sec" onclick="A.student('+id+')">Не убирать</button><button class="btn danger" onclick="A.removeDo('+id+')">Убрать</button></div>');},
   removeDo:function(id){act('student/remove',{id:id},'Ученик убран');},
 
-  payPick:function(){var d=S.data;if(!d.students.length){toast('Сначала пригласите ученика');return;}
-    var list=d.students.slice().sort(function(a,b){var x=isDue(a)?0:1,y=isDue(b)?0:1;return x-y||a.left-b.left||a.name.localeCompare(b.name);});
-    var h='<h3>Внести оплату</h3><div class="m">Выберите ученика</div>'+(list.length>6?'<div style="margin-top:12px">'+searchBox('ppq','Найти ученика')+'</div>':'')+'<div class="grp group">';
-    list.forEach(function(s){h+='<button class="card" data-n="'+esc(s.name.toLowerCase())+'" onclick="A.pay('+s.id+')"><span class="n"><b>'+esc(s.name)+'</b></span>'+balShort(s)+'</button>';});
-    openSheet(h+'</div><div class="row"><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>');},
-  payStudent:function(id){var s=stu(id);if(!s)return;var ps=(S.data.payments||[]).filter(function(p){return p.student_id===id;});
-    var h='<h3>'+esc(s.name)+'</h3><div class="m">'+balText(s.left,s.paid,s.used)+'</div><div class="row"><button class="btn" onclick="A.pay('+id+')">Внести оплату</button>'+(isDue(s)?'<button class="btn sec" onclick="A.remind('+id+')">Напомнить</button>':'')+'</div>';
-    if(ps.length)h+='<div class="sect">Оплаты</div><div class="group">'+ps.slice(0,6).map(payHist).join('')+'</div>';
-    openSheet(h+'<div class="row"><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>');},
   payHistory:function(){var ps=S.data.payments||[];openSheet('<h3>История оплат</h3><div class="group" style="margin-top:14px">'+ps.map(payHist).join('')+'</div>'+'<div class="row"><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>');},
   pay:function(id){var s=stu(id),set=S.data.settings,fresh=!s.paid;
     openSheet('<h3>Оплата · '+esc(s.name)+'</h3><div class="m">Сейчас: '+balText(s.left,s.paid,s.used)+'.</div>'+(fresh?'<label>Что вносим</label>'+opts('pkind',[['pay','Новая оплата'],['initial','Начальный остаток']],'pay'):'')+'<div class="two"><div><label for="pn">Уроков</label><input type="number" inputmode="numeric" id="pn" min="1" value="'+set.pack_size+'"></div><div id="pamt"><label for="pa">Сумма, zł</label><input type="number" inputmode="numeric" id="pa" min="0" value="'+(set.pack_price||'')+'" placeholder="необязательно"></div></div><div class="hint" id="pnote">Ученику придёт подтверждение и новый остаток.</div><div class="row"><button class="btn sec" onclick="closeSheetX()">Отмена</button><button class="btn" id="paySave" onclick="A.payDo('+id+')">Внести</button></div>');},

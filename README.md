@@ -12,6 +12,7 @@ A free Telegram Mini App for scheduling private lessons — built for a drum tea
 
 **Rescheduling without chaos**
 - Either side proposes a new time → the other gets a Telegram message with *Confirm* / *Doesn't work*.
+- One tap to propose: open a lesson (students: *Can't make it*) and tap one of the suggested free slots. A toast lets you withdraw it.
 - Busy times can't be proposed: other lessons, the teacher's "I'm busy" marks (gigs, trips). Moving a whole weekly series checks every date.
 - Unanswered proposals expire on their own; if a lesson starts with an open question, the teacher decides whether it happened.
 - Teacher marks a gig → every affected lesson gets a reschedule proposal with suggested free slots in one tap.
@@ -21,8 +22,9 @@ A free Telegram Mini App for scheduling private lessons — built for a drum tea
 
 **Packages and payments, one tap**
 - Students buy packages (e.g. 4 lessons). A lesson is deducted after it happens — not while a question about it is still open.
-- On the day of the first unpaid lesson, the teacher gets a Telegram message with a single **Paid** button.
-- Students see *"Paid until December 6"* and can tap **I paid** — the teacher confirms with *Received* / *Not received*.
+- On the day of the first unpaid lesson, the teacher gets a Telegram message with a single **Payment received** button.
+- Students and payments live in one list: who owes is on top, and recording a payment is one tap in the student's card.
+- Students see *"Paid until December 6"* and which lessons are paid. A **Pay** button appears only when the package runs out (online payment is coming later).
 - Late-cancellation rule (none / 6 / 12 / 24 h), payment reminders, full payment history.
 
 **Everything else**
@@ -31,7 +33,7 @@ A free Telegram Mini App for scheduling private lessons — built for a drum tea
 - iOS-style design, follows Telegram's light and dark themes.
 - Demo teacher dashboard with fake students for the bot owner.
 
-![I paid → teacher confirms; weekly lessons by default](design/screens/v6-payments.png)
+![Students and payments in one list, one-tap payment, student's "Can't make it" with free slots, payment due](design/screens/v6-payments.png)
 
 ## How it works
 
