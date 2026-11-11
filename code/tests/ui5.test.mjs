@@ -93,7 +93,18 @@ await T.click('.card:has-text("Ола") >> nth=0'); await shot(T, '09-student-ca
 await bg(T);
 // Марек ждёт оплату: в карточке «Получил оплату» — одно нажатие
 await T.click('.card:has-text("Марек") >> nth=0'); await shot(T, '12-student-card-due');
-await T.click('#payS'); await T.waitForTimeout(400); await shot(T, '13-pay-toast');
+await T.click('#sheet >> text=Получил оплату'); await shot(T, '13-pay-sheet');
+expect(/Записать · 4 урока · 600 zł/.test(await T.textContent('#paySave')), 'pay sheet: pack preselected');
+await T.click('.opts[data-name="pn"] [data-v="1"]');
+expect(/Записать · 1 урок · 150 zł/.test(await T.textContent('#paySave')), 'pay sheet: 1 lesson → 150 zł');
+await T.click('.opts[data-name="pn"] [data-v="x"]'); await T.fill('#pn', '6'); await shot(T, '13b-pay-sheet-other');
+expect(/Записать · 6 уроков · 900 zł/.test(await T.textContent('#paySave')), 'pay sheet: 6 lessons → 900 zł');
+await T.fill('#pa', '850');
+expect(/6 уроков · 850 zł/.test(await T.textContent('#paySave')), 'pay sheet: amount can be changed');
+await T.click('#pkind'); await shot(T, '13c-pay-sheet-initial');
+expect(/Записать остаток · 6 уроков/.test(await T.textContent('#paySave')), 'pay sheet: initial balance mode');
+await T.click('#pkind'); await T.click('.opts[data-name="pn"] [data-v="8"]');
+await T.click('#paySave'); await T.waitForTimeout(500); await shot(T, '13d-pay-toast');
 await T.click('role=tab[name=/Расписание/]'); await T.click('.fab >> text=+ Урок');
 await T.selectOption('#als', String(sid['Кася'])); await T.fill('#ald', d(0)); await T.fill('#alt', '17:30');
 await T.click('#sheet >> text=Добавить'); await T.waitForTimeout(400); await shot(T, '14-add-conflict');

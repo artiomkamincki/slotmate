@@ -459,12 +459,13 @@ async function handleCallback(cq, env, origin) {
         await edit(env, cq, r.error || r.msg);
         note = r.error || 'Отмечено';
       } else if (p[0] === 'pd') {
-        const r = await payForLesson(env, user, Number(p[1]), origin);
+        // pd:<урок>:<сколько уроков>; в старых сообщениях числа нет — тогда абонемент.
+        const r = await payForLesson(env, user, Number(p[1]), origin, Number(p[2]) || 0);
         await edit(env, cq, r.error || r.msg);
         note = r.error || 'Оплата записана';
       } else if (p[0] === 'pl') {
-        await edit(env, cq, 'Хорошо. Когда ученик оплатит — откройте урок в приложении и нажмите «Получил оплату».', appButton(origin, 'Открыть урок', `l=${Number(p[1])}`));
-        note = 'Позже';
+        await edit(env, cq, 'Хорошо. Когда ученик оплатит — откройте урок или карточку ученика в приложении и нажмите «Получил оплату».', appButton(origin, 'Открыть урок', `l=${Number(p[1])}`));
+        note = 'Пока не оплатил';
       } else if (p[0] === 'ca' || p[0] === 'cr') {
         const r = await answerClaim(env, user, Number(p[1]), p[0] === 'ca', origin, cq);
         note = r.error || r.note || '';
@@ -969,17 +970,30 @@ async function lessonCovered(env, l) {
 }
 
 function packText(set) { return `${lessonsWord(set.pack_size)}${set.pack_price ? ` · ${set.pack_price} zł` : ''}`; }
+// Сумма за n уроков по цене абонемента: 4 за 600 → 1 урок 150, 8 уроков 1200 (так же считает экран).
+function priceFor(set, n) {
+  if (!set.pack_price || !(n >= 1)) return 0;
+  const k = n / set.pack_size;
+  return Number.isInteger(k) ? set.pack_price * k : Math.round((n * set.pack_price) / set.pack_size);
+}
+// Варианты для кнопок: 1 урок, абонемент, два абонемента.
+function payPresets(set) {
+  const p = set.pack_size || 4, a = p === 1 ? [1, 4, 8] : [1, p, 2 * p];
+  return a.filter((x, i) => a.indexOf(x) === i);
+}
+function payText(set, n) { const sum = priceFor(set, n); return `${lessonsWord(n)}${sum ? ` · ${sum} zł` : ''}`; }
 
-// «Получил оплату» в уроке (кнопка в Телеграме или в приложении): абонемент по настройкам учителя, одним нажатием.
-async function payForLesson(env, user, lid, origin) {
+// «Получил оплату» кнопкой в сообщении бота: за сколько уроков — выбрал учитель, сумма по цене урока.
+async function payForLesson(env, user, lid, origin, lessons = 0) {
   const l = await loadLesson(env, lid);
   if (!l || l.teacher_id !== user.tg_id) return { error: 'Только для учителя' };
   if (await lessonCovered(env, l)) return { error: 'Этот урок уже оплачен' };
   const took = await env.DB.prepare('UPDATE lessons SET pay_asked = 2 WHERE id = ? AND pay_asked != 2').bind(lid).run();
   if (!changed(took)) return { error: 'Оплата по этому уроку уже записана' };
   const set = await settingsOf(env, l.teacher_id);
-  const id = await recordPayment(env, user, { id: l.student_id, tg_id: l.student_tg }, set.pack_size, set.pack_price, 'pay', origin);
-  return { ok: true, id, msg: `Записано: ${esc(l.student_name)}, ${packText(set)}. Ученик получил подтверждение.` };
+  const n = Math.min(Math.max(Math.round(lessons) || set.pack_size, 1), 100);
+  const id = await recordPayment(env, user, { id: l.student_id, tg_id: l.student_tg }, n, priceFor(set, n), 'pay', origin);
+  return { ok: true, id, msg: `Записано: ${esc(l.student_name)}, ${payText(set, n)}. Ученик получил подтверждение. Ошиблись — «Все оплаты» в приложении → «Отменить».` };
 }
 
 // Ученик нажал «Я оплатил»: абонемент засчитается, только когда учитель подтвердит.
@@ -1320,7 +1334,7 @@ async function runHourly(env, origin) {
   });
 
   await step('pay-reminders', async () => {
-  // 5. За 3 часа до урока: если оплаченные уроки закончились — учителю кнопка «Получил оплату» (одно нажатие).
+  // 5. За 3 часа до урока: если оплаченные уроки закончились — учителю кнопки «за сколько уроков получил оплату» (одно нажатие).
   const { results: due } = await env.DB.prepare(`${LESSON_SELECT} WHERE l.pay_asked = 0 AND l.teacher_id > 0 AND l.status IN ${ACTIVE} AND COALESCE(l.reminder_answer, '') != 'no' AND l.starts_at > ? AND l.starts_at <= ? ORDER BY l.starts_at`)
     .bind(now, nowLocal(3 * 3600 * 1000)).all();
   for (const l of due) {
@@ -1333,9 +1347,12 @@ async function runHourly(env, origin) {
     const b = await balanceOf(env, l.student_id);
     const debt = b.left < 0 ? ` Долг: ${lessonsWord(-b.left)}.` : '';
     const none = !b.paid && !b.used;
-    await send(env, l.teacher_id, `Сегодня в <b>${l.starts_at.slice(11, 16)}</b> — ${esc(l.student_name)}. ${none ? 'Оплаты ещё не было.' : 'Оплаченные уроки закончились.'}${debt}\nЖдём оплату: ${packText(set)}.`, { inline_keyboard: [
-      [{ text: `Получил оплату · ${packText(set)}`, callback_data: `pd:${l.id}` }],
-      [{ text: 'Позже', callback_data: `pl:${l.id}` }],
+    // Кнопки: за сколько уроков получили оплату (1 / абонемент / два), «Другое…» — окно оплаты в приложении.
+    const opts = payPresets(set).map((n) => ({ text: payText(set, n), callback_data: `pd:${l.id}:${n}` }));
+    opts.push({ text: 'Другое…', web_app: { url: appUrl(origin, `s=${l.student_id}&pay=1`) } });
+    await send(env, l.teacher_id, `Сегодня в <b>${l.starts_at.slice(11, 16)}</b> — ${esc(l.student_name)}. ${none ? 'Оплаты ещё не было.' : 'Оплаченные уроки закончились.'}${debt}\nПолучили оплату? Нажмите, за сколько уроков:`, { inline_keyboard: [
+      opts.slice(0, 2), opts.slice(2),
+      [{ text: 'Пока не оплатил', callback_data: `pl:${l.id}` }],
     ] });
   }
   });

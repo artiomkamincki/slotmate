@@ -100,10 +100,10 @@ expect(r.j.lessons.find((l) => l.id === today1).pay_due === true && sub.paid_unt
 r = await api(PAV, 'me');
 expect(r.j.lessons.find((l) => l.id === today1).pay_due === true, 'teacher app: lesson shows «Оплатил»');
 sent.length = 0; await scheduled();
-const payAsk = sent.find((x) => /Ждём оплату/.test(x.body.text || ''));
-expect(!!payAsk && payAsk.body.chat_id === 333 && /pd:/.test(JSON.stringify(payAsk.body.reply_markup)), 'teacher gets «Ждём оплату» with one button');
+const payAsk = sent.find((x) => /Получили оплату\?/.test(x.body.text || ''));
+expect(!!payAsk && payAsk.body.chat_id === 333 && /pd:/.test(JSON.stringify(payAsk.body.reply_markup)), 'teacher gets «Получили оплату?» with buttons');
 sent.length = 0; await scheduled();
-expect(!sent.some((x) => /Ждём оплату/.test(x.body.text || '')), 'asked once');
+expect(!sent.some((x) => /Получили оплату\?/.test(x.body.text || '')), 'asked once');
 c = await cb(PAV, `pd:${today1}`);
 const pays = () => db.prepare('SELECT * FROM payments WHERE student_id=?').all(sid['Ола']);
 expect(pays().length === 1 && pays()[0].lessons === 4 && pays()[0].amount === 600, 'one tap recorded 4 lessons · 600 zł');
