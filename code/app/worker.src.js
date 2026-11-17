@@ -1,4 +1,4 @@
-// SlotMate v6 — мини-приложение в Телеграме + бот для уведомлений.
+// SlotMate — мини-приложение в Телеграме + бот для уведомлений (+ Google Календарь, если заданы секреты GOOGLE_*).
 // Cloudflare Worker + база D1. Нужны: привязка D1 с именем DB и секрет BOT_TOKEN.
 // Первый запуск: откройте адрес воркера с /setup на конце. Повторно /setup работает
 // только с ключом: добавьте секрет SETUP_KEY и откройте /setup?key=<этот ключ>.
@@ -33,8 +33,14 @@ export default {
     if (url.pathname === '/app' || url.pathname === '/app/') {
       return new Response(APP_HTML, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' } });
     }
+    if (url.pathname === '/google/callback') {
+      try { return await gCallback(url, env, ctx); } catch (e) {
+        console.error('google callback failed', (e && e.stack) || e);
+        return gPage('Не получилось', 'Что-то пошло не так. Попробуйте подключить Google Календарь ещё раз.', null);
+      }
+    }
     if (url.pathname.startsWith('/api/') && request.method === 'POST') {
-      try { return await handleApi(request, env, url); } catch (e) {
+      try { return await handleApi(request, env, url, ctx); } catch (e) {
         console.error('api failed', url.pathname, (e && e.stack) || e);
         return json({ error: 'Что-то пошло не так. Попробуйте ещё раз.' }, 500);
       }
@@ -46,6 +52,8 @@ export default {
       let update;
       try { update = await request.json(); } catch (e) { return new Response('bad request', { status: 400 }); }
       try { await handleUpdate(update, env, url.origin); } catch (e) { console.error('update failed', (e && e.stack) || e); }
+      // Кнопки бота меняют уроки (подтвердил перенос, отменил…) — сверяем Google Календарь.
+      if (update.callback_query && update.callback_query.from) await gAfter(env, update.callback_query.from.id, ctx);
       return new Response('ok');
     }
     return text('SlotMate работает.');
@@ -94,6 +102,15 @@ async function ensureSchema(env) {
       id INTEGER PRIMARY KEY AUTOINCREMENT, teacher_id INTEGER NOT NULL, student_id INTEGER NOT NULL,
       lessons INTEGER NOT NULL, amount INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'open',
       msg_chat INTEGER, msg_id INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
+    // Google Календарь: доступ (зашифрован), какие уроки уже лежат в Google, занятость учителя по дням.
+    `CREATE TABLE IF NOT EXISTS google_accounts (
+      tg_id INTEGER PRIMARY KEY, email TEXT, refresh_enc TEXT NOT NULL, calendar_id TEXT,
+      busy_ok INTEGER NOT NULL DEFAULT 0, busy_on INTEGER NOT NULL DEFAULT 0, busy_synced_at TEXT,
+      status TEXT NOT NULL DEFAULT 'ok', connected_at TEXT)`,
+    `CREATE TABLE IF NOT EXISTS gcal_events (tg_id INTEGER NOT NULL, lesson_id INTEGER NOT NULL, event_id TEXT NOT NULL, hash TEXT, PRIMARY KEY (tg_id, lesson_id))`,
+    `CREATE TABLE IF NOT EXISTS gcal_busy (id INTEGER PRIMARY KEY AUTOINCREMENT, teacher_id INTEGER NOT NULL, day TEXT NOT NULL, from_t TEXT NOT NULL, to_t TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS gcal_seen (lesson_id INTEGER NOT NULL, starts_at TEXT NOT NULL, PRIMARY KEY (lesson_id, starts_at))`,
+    `CREATE INDEX IF NOT EXISTS idx_gcal_busy ON gcal_busy (teacher_id, day)`,
     `CREATE INDEX IF NOT EXISTS idx_lessons_teacher ON lessons (teacher_id, starts_at)`,
     `CREATE INDEX IF NOT EXISTS idx_lessons_student ON lessons (student_id, starts_at)`,
     `CREATE INDEX IF NOT EXISTS idx_users_invite ON users (invite_code)`,
@@ -295,7 +312,9 @@ async function findConflict(env, teacherId, ts, dur, excludeId, excludeSeries) {
       if (a < x + l.duration_min && x < b) return { kind: 'proposal', name: l.student_name, at: l.proposed_start.slice(11, 16) };
     }
   }
-  const { results: bs } = await env.DB.prepare('SELECT * FROM busy WHERE teacher_id = ? AND day = ?').bind(teacherId, day).all();
+  const { results: own } = await env.DB.prepare('SELECT * FROM busy WHERE teacher_id = ? AND day = ?').bind(teacherId, day).all();
+  const { results: gb } = await env.DB.prepare('SELECT from_t, to_t FROM gcal_busy WHERE teacher_id = ? AND day = ?').bind(teacherId, day).all();
+  const bs = own.concat(gb.map((x) => ({ ...x, note: G_NOTE })));
   for (const x of bs) {
     if (a < mins(x.to_t) && mins(x.from_t) < b) return { kind: 'busy', note: x.note || 'занято', from: x.from_t, to: x.to_t };
   }
@@ -305,6 +324,7 @@ async function findConflict(env, teacherId, ts, dur, excludeId, excludeSeries) {
 function conflictText(c, forTeacher) {
   if (c.kind === 'busy') {
     const span = c.from === '00:00' && c.to === '23:59' ? 'весь день' : `${c.from}–${c.to}`;
+    if (c.note === G_NOTE) return forTeacher ? `В это время вы заняты по Google Календарю (${span}).` : `Учитель в это время занят (${span}).`;
     return forTeacher ? `В это время у вас отмечено: ${c.note} (${span}).` : `Учитель в это время занят: ${c.note} (${span}).`;
   }
   if (!forTeacher) return 'У учителя это время уже занято.';
@@ -724,7 +744,7 @@ async function addLesson(env, user, sid, ts, weeks, force, duration, auto) {
 
 // ---------- API для приложения ----------
 
-async function handleApi(request, env, url) {
+async function handleApi(request, env, url, ctx) {
   const from = await verifyInitData(env, request.headers.get('x-init-data') || '');
   if (!from) return json({ error: 'Откройте приложение из Телеграма' }, 401);
   let user = await upsertUser(env, from);
@@ -735,7 +755,7 @@ async function handleApi(request, env, url) {
     if (!user.is_admin) return json({ error: 'Демо доступно только владельцу' }, 403);
     if (path === 'demo/reset' || !(await env.DB.prepare('SELECT 1 FROM users WHERE tg_id = ?').bind(DEMO_T).first())) await seedDemo(env);
     if (path === 'demo/reset') return json({ ok: true });
-    if (['invite', 'teacher_invite', 'calendar'].includes(path)) return json({ error: 'В демо это недоступно — здесь нет настоящих учеников' }, 400);
+    if (['invite', 'teacher_invite', 'calendar'].includes(path) || path.startsWith('google/')) return json({ error: 'В демо это недоступно — здесь нет настоящих учеников' }, 400);
     if (path === 'demo/as_student') {
       const l = await loadLesson(env, Number(body.id));
       if (!l || l.teacher_id !== DEMO_T) return json({ error: 'Урок не найден' }, 400);
@@ -749,7 +769,25 @@ async function handleApi(request, env, url) {
   const teacherOnly = () => (user.is_teacher ? null : json({ error: 'Только для учителя' }, 403));
   let r, deny;
   switch (path) {
-    case 'me': return json(await meData(env, user, body));
+    case 'me': {
+      const out = await meData(env, user, body);
+      out.google = await gInfo(env, user);
+      // Учитель открыл приложение, а занятость из Google старше 15 минут — обновим в фоне.
+      if (out.google && out.google.busy_on) {
+        const acc = await gAccount(env, user.tg_id);
+        if (acc && (!acc.busy_synced_at || acc.busy_synced_at < nowLocal(-15 * 60 * 1000))) {
+          const p = gRefreshBusy(env, acc, gRun(5)).then((ok) => ok && gNotifyAffected(env, acc, origin)).catch((e) => console.error('google busy failed', e));
+          if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p;
+        }
+      }
+      return json(out);
+    }
+    case 'google/start': {
+      if (!gOn(env)) return json({ error: 'Google Календарь пока не настроен' }, 400);
+      r = { url: await gStartUrl(env, user, origin) }; break;
+    }
+    case 'google/busy': r = await gSetBusy(env, user, !!body.on); break;
+    case 'google/disconnect': r = await gDisconnect(env, user, !!body.delete_calendar); break;
     case 'lesson/add': r = await addLesson(env, user, Number(body.student_id), body.starts_at, body.weeks, !!body.force, body.duration, !!body.auto); break;
     case 'lesson/propose': r = await proposeLesson(env, user, Number(body.id), body.starts_at, body.scope, origin); break;
     case 'lesson/resolve': r = await resolveLesson(env, user, Number(body.id), !!body.held); break;
@@ -869,6 +907,8 @@ async function handleApi(request, env, url) {
     default: return json({ error: 'not found' }, 404);
   }
   if (r.error) return json({ error: r.error }, 400);
+  // Действие могло поменять уроки — сверяем Google Календарь (его и тех, с кем у него уроки).
+  if (/^(lesson|series|student)\//.test(path)) await gAfter(env, user.tg_id, ctx);
   return json(r);
 }
 
@@ -886,7 +926,8 @@ async function meData(env, user, body) {
   const busyAll = [];
   for (const tid of teacherIds) {
     const { results: b } = await env.DB.prepare('SELECT * FROM busy WHERE teacher_id = ? AND day >= ? AND day < ?').bind(tid, lo, to).all();
-    busyAll.push(...b);
+    const { results: g } = await env.DB.prepare('SELECT * FROM gcal_busy WHERE teacher_id = ? AND day >= ? AND day < ?').bind(tid, lo, to).all();
+    busyAll.push(...b, ...g.map((x) => ({ ...x, note: G_NOTE })));
   }
   const seriesIds = [...new Set(results.filter((l) => l.series_id).map((l) => l.series_id))];
   const seriesDates = {}, autoSeries = new Set();
@@ -930,6 +971,9 @@ async function meData(env, user, body) {
     out.students = st.map((s) => ({ ...s, paid: Number(s.paid), used: Number(s.used), left: Number(s.paid) - Number(s.used) }));
     const { results: own } = await env.DB.prepare('SELECT * FROM busy WHERE teacher_id = ? AND day >= ? AND day < ?').bind(user.tg_id, lo, to).all();
     out.busy = own.map((b) => ({ id: b.id, day: b.day, from_t: b.from_t, to_t: b.to_t, note: b.note }));
+    // Занятость из Google — те же строки в расписании, но без «убрать» (меняется в самом Google). id отрицательные.
+    const { results: gown } = await env.DB.prepare('SELECT * FROM gcal_busy WHERE teacher_id = ? AND day >= ? AND day < ? ORDER BY day, from_t').bind(user.tg_id, lo, to).all();
+    out.busy.push(...gown.map((b) => ({ id: -b.id, day: b.day, from_t: b.from_t, to_t: b.to_t, note: G_NOTE, google: true })));
     const monthStart = `${today.slice(0, 7)}-01`;
     const m = await env.DB.prepare('SELECT COALESCE(SUM(amount), 0) AS got, COUNT(*) AS n FROM payments WHERE teacher_id = ? AND created_at >= ?').bind(user.tg_id, monthStart).first();
     // Ждём оплату: уроки закончились — или оплат ещё не было, а урок уже назначен
@@ -1414,4 +1458,309 @@ async function runHourly(env, origin) {
     if (origin) await sendProposal(env, l, origin, 'Ждём вашего ответа уже сутки.\n\n');
   }
   });
+
+  // 7. Google Календарь: занятость учителей, сверка уроков (порциями), сообщения о накладках.
+  await step('google', () => gHourly(env, origin));
+}
+
+// ---------- Google Календарь ----------
+// 1) Уроки пишутся в отдельный календарь «SlotMate» в Google у того, кто подключился (учитель — все свои уроки, ученик — свои).
+// 2) Учитель может включить «Учитывать мою занятость из Google»: берём только «занят / свободен» из его основного календаря
+//    и раскладываем по дням в gcal_busy — дальше это работает как «Я занят».
+// Нужны секреты GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET и GCAL_KEY (ключ шифрования). Без них раздел просто не показывается.
+// Бесплатный Cloudflare: не больше 50 внешних запросов за запуск — поэтому у синхронизации свой «бюджет» запросов.
+
+const G_SCOPE_EVENTS = 'https://www.googleapis.com/auth/calendar.app.created';
+const G_SCOPE_BUSY = 'https://www.googleapis.com/auth/calendar.freebusy';
+const G_API = 'https://www.googleapis.com/calendar/v3';
+const G_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const G_WEEKS = 8;
+const G_NOTE = 'занято (Google)';
+
+function gOn(env) { return !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GCAL_KEY); }
+function gRun(max) { return { calls: 0, max }; }
+function b64(bytes) { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function unb64(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); }
+async function gKey(env) {
+  const raw = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`slotmate-gcal:${env.GCAL_KEY}`));
+  return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+async function gEncrypt(env, s) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await gKey(env), new TextEncoder().encode(s));
+  return `${b64(iv)}.${b64(new Uint8Array(ct))}`;
+}
+async function gDecrypt(env, v) {
+  const [a, b] = String(v).split('.');
+  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(a) }, await gKey(env), unb64(b)));
+}
+async function gState(env, tgId, ts) { return `${tgId}.${ts}.${hex(await hmac(new TextEncoder().encode(`google:${env.BOT_TOKEN}`), `${tgId}.${ts}`)).slice(0, 32)}`; }
+function gHash(o) { const s = JSON.stringify(o); let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); }
+function addMin(ts, m) {
+  const [y, mo, d] = ts.slice(0, 10).split('-').map(Number), [h, mi] = ts.slice(11, 16).split(':').map(Number);
+  return new Date(Date.UTC(y, mo - 1, d, h, mi + m)).toISOString().slice(0, 16).replace('T', ' ');
+}
+function toLocalTs(iso) { const p = localParts(new Date(iso)); return `${p.y}-${pad(p.m)}-${pad(p.d)} ${pad(p.h)}:${pad(p.mi)}`; }
+
+// Один запрос к Google с учётом бюджета запусков.
+async function gFetch(run, url, opts) {
+  if (run.calls >= run.max) return { ok: false, status: 0, budget: true, data: null };
+  run.calls++;
+  try {
+    const res = await fetch(url, opts);
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok) console.log('Google error', res.status, url.replace(/\?.*/, ''), data && (data.error_description || (data.error && (data.error.message || data.error))));
+    return { ok: res.ok, status: res.status, data };
+  } catch (e) {
+    console.log('Google unreachable', e && e.message);
+    return { ok: false, status: 0, data: null };
+  }
+}
+async function gAccount(env, tgId) { return env.DB.prepare('SELECT * FROM google_accounts WHERE tg_id = ?').bind(tgId).first(); }
+
+// Доступ отозван (человек убрал SlotMate в настройках Google) — отмечаем и сообщаем один раз.
+async function gRevoked(env, acc) {
+  const took = await env.DB.prepare("UPDATE google_accounts SET status = 'revoked' WHERE tg_id = ? AND status = 'ok'").bind(acc.tg_id).run();
+  acc.status = 'revoked';
+  if (changed(took)) await send(env, acc.tg_id, 'Google Календарь отключился: доступ к нему отозван. Чтобы уроки снова появлялись в Google, подключите его заново в настройках приложения.');
+}
+async function gToken(env, acc, run) {
+  if (acc._at) return acc._at;
+  if (acc.status !== 'ok') return null;
+  const r = await gFetch(run, G_TOKEN_URL, {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, refresh_token: await gDecrypt(env, acc.refresh_enc), grant_type: 'refresh_token' }).toString(),
+  });
+  if (!r.ok) {
+    if (r.data && r.data.error === 'invalid_grant') await gRevoked(env, acc);
+    return null;
+  }
+  acc._at = r.data.access_token;
+  return acc._at;
+}
+async function gApi(env, acc, run, method, path, body) {
+  const t = await gToken(env, acc, run);
+  if (!t) return { ok: false, status: 0, data: null, noToken: true };
+  return gFetch(run, G_API + path, { method, headers: { authorization: `Bearer ${t}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+}
+async function gCreateCalendar(env, acc, run) {
+  const r = await gApi(env, acc, run, 'POST', '/calendars', { summary: 'SlotMate', description: 'Уроки из SlotMate. Время урока меняется только в приложении — правки здесь не сохранятся.', timeZone: TZ });
+  if (!r.ok || !r.data || !r.data.id) return null;
+  await env.DB.batch([
+    env.DB.prepare('UPDATE google_accounts SET calendar_id = ? WHERE tg_id = ?').bind(r.data.id, acc.tg_id),
+    env.DB.prepare('DELETE FROM gcal_events WHERE tg_id = ?').bind(acc.tg_id),
+  ]);
+  acc.calendar_id = r.data.id;
+  return r.data.id;
+}
+
+// Каким должно быть событие урока в календаре этого человека.
+function gEventBody(l, uid) {
+  const notes = [];
+  if (l.status === 'pending' && l.proposed_start) notes.push(`Предложен перенос на ${fmt(l.proposed_start)} — ждём ответа. Пока урок стоит на этом времени.`);
+  notes.push('Время урока меняется в SlotMate.');
+  return {
+    summary: l.teacher_id === uid ? `Урок: ${l.student_name}` : `Урок · ${l.teacher_name}`,
+    description: notes.join('\n'),
+    start: { dateTime: `${l.starts_at.replace(' ', 'T')}:00`, timeZone: TZ },
+    end: { dateTime: `${addMin(l.starts_at, l.duration_min || 60).replace(' ', 'T')}:00`, timeZone: TZ },
+  };
+}
+
+// Сверка: сравниваем уроки с тем, что уже лежит в Google, и правим только разницу.
+async function gSyncUser(env, acc, run) {
+  if (acc.status !== 'ok') return;
+  const today = nowLocal().slice(0, 10), lo = `${addDays(today, -7)} 00:00`, hi = `${addDays(today, G_WEEKS * 7)} 00:00`;
+  const { results: ls } = await env.DB.prepare(`${LESSON_SELECT} WHERE (l.teacher_id = ? OR s.tg_id = ?) AND l.status IN ${ACTIVE} AND l.starts_at >= ? AND l.starts_at < ? ORDER BY l.starts_at LIMIT 300`)
+    .bind(acc.tg_id, acc.tg_id, lo, hi).all();
+  const want = new Map(ls.map((l) => { const body = gEventBody(l, acc.tg_id); return [l.id, { body, hash: gHash(body) }]; }));
+  const { results: have } = await env.DB.prepare('SELECT lesson_id, event_id, hash FROM gcal_events WHERE tg_id = ?').bind(acc.tg_id).all();
+  const ops = [];
+  for (const h of have) {
+    const w = want.get(h.lesson_id);
+    if (w) { if (w.hash !== h.hash) ops.push({ kind: 'patch', lid: h.lesson_id, eid: h.event_id, ...w }); continue; }
+    const l = await env.DB.prepare('SELECT status, starts_at FROM lessons WHERE id = ?').bind(h.lesson_id).first();
+    // Урок просто ушёл в прошлое — событие оставляем как историю, а следить перестаём.
+    if (l && ['scheduled', 'pending'].includes(l.status) && l.starts_at < lo) await env.DB.prepare('DELETE FROM gcal_events WHERE tg_id = ? AND lesson_id = ?').bind(acc.tg_id, h.lesson_id).run();
+    else ops.push({ kind: 'delete', lid: h.lesson_id, eid: h.event_id });
+  }
+  const known = new Set(have.map((h) => h.lesson_id));
+  for (const [lid, w] of want) if (!known.has(lid)) ops.push({ kind: 'insert', lid, ...w });
+  if (!ops.length) return;
+  const cal = acc.calendar_id || (await gCreateCalendar(env, acc, run));
+  if (!cal) return;
+  const path = `/calendars/${encodeURIComponent(cal)}/events`;
+  const save = (lid, eid, hash) => env.DB.prepare('INSERT OR REPLACE INTO gcal_events (tg_id, lesson_id, event_id, hash) VALUES (?, ?, ?, ?)').bind(acc.tg_id, lid, eid, hash).run();
+  for (const op of ops) {
+    if (run.calls >= run.max || acc.status !== 'ok') break;
+    if (op.kind === 'delete') {
+      const r = await gApi(env, acc, run, 'DELETE', `${path}/${encodeURIComponent(op.eid)}`);
+      if (r.ok || r.status === 404 || r.status === 410) await env.DB.prepare('DELETE FROM gcal_events WHERE tg_id = ? AND lesson_id = ?').bind(acc.tg_id, op.lid).run();
+      continue;
+    }
+    let r = op.kind === 'patch' ? await gApi(env, acc, run, 'PATCH', `${path}/${encodeURIComponent(op.eid)}`, op.body) : null;
+    if (!r || r.status === 404 || r.status === 410) r = await gApi(env, acc, run, 'POST', path, op.body);
+    if (r.ok && r.data && r.data.id) await save(op.lid, r.data.id, op.hash);
+    else if (r.status === 404 && op.kind === 'insert') { await gCreateCalendar(env, acc, run); return; } // календарь удалили в Google — заведём новый
+  }
+}
+
+// Кого сверять после действия человека: его самого и тех, с кем у него уроки.
+async function gSyncRelated(env, uid, run) {
+  const { results } = await env.DB.prepare(`SELECT * FROM google_accounts WHERE status = 'ok' AND (tg_id = ? OR tg_id IN (SELECT tg_id FROM students WHERE teacher_id = ?) OR tg_id IN (SELECT teacher_id FROM students WHERE tg_id = ?))`)
+    .bind(uid, uid, uid).all();
+  for (const acc of results) await gSyncUser(env, acc, run);
+}
+// После изменений — сверка «в фоне» (после ответа приложению). В тестах (нет ctx) — сразу.
+async function gAfter(env, uid, ctx) {
+  if (!gOn(env) || !(uid > 0)) return;
+  const p = gSyncRelated(env, uid, gRun(20)).catch((e) => console.error('google sync failed', (e && e.stack) || e));
+  if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p;
+}
+
+// Занятость учителя из Google: «занят / свободен» на 8 недель, по дням — как «Я занят».
+async function gRefreshBusy(env, acc, run) {
+  if (acc.status !== 'ok' || !acc.busy_on) return false;
+  const today = nowLocal().slice(0, 10), end = addDays(today, G_WEEKS * 7);
+  const r = await gApi(env, acc, run, 'POST', '/freeBusy', {
+    timeMin: new Date(localToUtcMs(`${today} 00:00`)).toISOString(), timeMax: new Date(localToUtcMs(`${end} 00:00`)).toISOString(), timeZone: TZ, items: [{ id: 'primary' }],
+  });
+  if (r.status === 403) { await env.DB.prepare('UPDATE google_accounts SET busy_ok = 0, busy_on = 0 WHERE tg_id = ?').bind(acc.tg_id).run(); acc.busy_on = 0; return false; }
+  const cal = r.ok && r.data && r.data.calendars && r.data.calendars.primary;
+  if (!cal || (cal.errors && cal.errors.length)) return false;
+  const rows = [];
+  for (const b of cal.busy || []) {
+    const a = toLocalTs(b.start), z = toLocalTs(b.end);
+    for (let day = a.slice(0, 10); day <= z.slice(0, 10) && rows.length < 300; day = addDays(day, 1)) {
+      const f = day === a.slice(0, 10) ? a.slice(11, 16) : '00:00';
+      const t = day === z.slice(0, 10) ? z.slice(11, 16) : '23:59';
+      if (f < t) rows.push([day, f, t]);
+    }
+  }
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM gcal_busy WHERE teacher_id = ?').bind(acc.tg_id),
+    ...rows.map(([day, f, t]) => env.DB.prepare('INSERT INTO gcal_busy (teacher_id, day, from_t, to_t) VALUES (?, ?, ?, ?)').bind(acc.tg_id, day, f, t)),
+    env.DB.prepare('UPDATE google_accounts SET busy_synced_at = ? WHERE tg_id = ?').bind(nowLocal(), acc.tg_id),
+  ]);
+  return true;
+}
+// Новые накладки «урок ↔ занято в Google» — одно сообщение учителю (про каждый урок — один раз).
+async function gNotifyAffected(env, acc, origin) {
+  if (!acc.busy_on) return;
+  const now = nowLocal(), hi = `${addDays(now.slice(0, 10), G_WEEKS * 7)} 00:00`;
+  const { results: ls } = await env.DB.prepare(`${LESSON_SELECT} WHERE l.teacher_id = ? AND l.status = 'scheduled' AND l.starts_at > ? AND l.starts_at < ? ORDER BY l.starts_at`).bind(acc.tg_id, now, hi).all();
+  if (!ls.length) return;
+  const { results: bs } = await env.DB.prepare('SELECT day, from_t, to_t FROM gcal_busy WHERE teacher_id = ?').bind(acc.tg_id).all();
+  const hit = [];
+  for (const l of ls) {
+    const day = l.starts_at.slice(0, 10), x = mins(l.starts_at.slice(11, 16));
+    if (!bs.some((b) => b.day === day && x < mins(b.to_t) && mins(b.from_t) < x + l.duration_min)) continue;
+    if (await env.DB.prepare('SELECT 1 FROM gcal_seen WHERE lesson_id = ? AND starts_at = ?').bind(l.id, l.starts_at).first()) continue;
+    hit.push(l);
+  }
+  if (!hit.length) return;
+  await env.DB.batch(hit.map((l) => env.DB.prepare('INSERT OR IGNORE INTO gcal_seen (lesson_id, starts_at) VALUES (?, ?)').bind(l.id, l.starts_at)));
+  const list = hit.slice(0, 5).map((l) => `• ${fmt(l.starts_at)} — ${esc(l.student_name)}`).join('\n') + (hit.length > 5 ? `\n…и ещё ${hit.length - 5}` : '');
+  await send(env, acc.tg_id, `В вашем Google Календаре занято время, на которое стоят уроки:\n${list}\n\nПеренести можно в расписании — кнопка «Перенести уроки» у строки «${G_NOTE}».`,
+    appButton(origin, 'Открыть расписание', `w=${monday(hit[0].starts_at.slice(0, 10))}`));
+}
+
+// Вход через Google: ссылка на страницу согласия.
+async function gStartUrl(env, user, origin) {
+  const ts = Date.now();
+  const scope = ['openid', 'email', G_SCOPE_EVENTS].concat(user.is_teacher ? [G_SCOPE_BUSY] : []).join(' ');
+  const q = new URLSearchParams({
+    client_id: env.GOOGLE_CLIENT_ID, redirect_uri: `${origin}/google/callback`, response_type: 'code', scope,
+    access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state: await gState(env, user.tg_id, ts),
+  });
+  return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
+}
+function gPage(title, msg, bot) {
+  const btn = bot ? `<p><a href="https://t.me/${bot}" style="display:inline-block;margin-top:12px;padding:14px 22px;border-radius:14px;background:#007AFF;color:#fff;text-decoration:none;font-weight:600">Вернуться в Телеграм</a></p>` : '';
+  return new Response(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SlotMate</title></head><body style="font:17px/1.45 -apple-system,system-ui,sans-serif;margin:0;padding:48px 24px;text-align:center;background:#F2F2F7;color:#000"><h2 style="margin:0 0 12px">${esc(title)}</h2><p style="margin:0;color:#3C3C43">${msg}</p>${btn}</body></html>`,
+    { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+}
+// Google вернул человека с кодом: меняем код на доступ, заводим календарь «SlotMate», сразу сверяем.
+async function gCallback(url, env, ctx) {
+  const bot = await getBotUsername(env).catch(() => null);
+  if (!gOn(env)) return gPage('Google Календарь не настроен', 'Подключение пока недоступно.', bot);
+  if (url.searchParams.get('error')) return gPage('Подключение отменено', 'Google Календарь не подключён. Попробовать снова можно в настройках приложения.', bot);
+  const [tgStr, tsStr] = String(url.searchParams.get('state') || '').split('.');
+  const tgId = Number(tgStr), ts = Number(tsStr);
+  if (!tgId || !ts || Date.now() - ts > 30 * 60 * 1000 || (await gState(env, tgId, ts)) !== url.searchParams.get('state')) {
+    return gPage('Ссылка устарела', 'Откройте настройки приложения и нажмите «Подключить Google Календарь» ещё раз.', bot);
+  }
+  const user = await env.DB.prepare('SELECT * FROM users WHERE tg_id = ?').bind(tgId).first();
+  if (!user) return gPage('Не получилось', 'Откройте приложение из Телеграма и попробуйте снова.', bot);
+  const run = gRun(30);
+  const r = await gFetch(run, G_TOKEN_URL, {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ code: url.searchParams.get('code') || '', client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, redirect_uri: `${url.origin}/google/callback`, grant_type: 'authorization_code' }).toString(),
+  });
+  if (!r.ok || !r.data || !r.data.refresh_token) return gPage('Не получилось', 'Google не дал доступ. Попробуйте ещё раз из настроек приложения.', bot);
+  const scopes = String(r.data.scope || '').split(' ');
+  if (!scopes.includes(G_SCOPE_EVENTS)) return gPage('Нужна галочка про календарь', 'Без разрешения на календарь SlotMate не сможет добавлять уроки. Подключите ещё раз и оставьте галочку «календари, созданные этим приложением».', bot);
+  let email = '';
+  try { email = JSON.parse(new TextDecoder().decode(unb64(String(r.data.id_token || '').split('.')[1] || ''))).email || ''; } catch (e) { email = ''; }
+  const busyOk = scopes.includes(G_SCOPE_BUSY) ? 1 : 0;
+  const old = await gAccount(env, tgId);
+  await env.DB.prepare(`INSERT INTO google_accounts (tg_id, email, refresh_enc, calendar_id, busy_ok, busy_on, status, connected_at) VALUES (?, ?, ?, ?, ?, ?, 'ok', ?)
+    ON CONFLICT(tg_id) DO UPDATE SET email = excluded.email, refresh_enc = excluded.refresh_enc, busy_ok = excluded.busy_ok, busy_on = excluded.busy_on, status = 'ok', connected_at = excluded.connected_at`)
+    .bind(tgId, email, await gEncrypt(env, r.data.refresh_token), old ? old.calendar_id : null, busyOk, busyOk && user.is_teacher ? 1 : 0, nowLocal()).run();
+  const acc = await gAccount(env, tgId);
+  acc._at = r.data.access_token;
+  // Переподключение: если старый календарь «SlotMate» на месте — пишем в него, иначе заводим новый.
+  if (acc.calendar_id) {
+    const c = await gApi(env, acc, run, 'GET', `/calendars/${encodeURIComponent(acc.calendar_id)}`);
+    if (!c.ok) await gCreateCalendar(env, acc, run);
+  } else await gCreateCalendar(env, acc, run);
+  await gSyncUser(env, acc, run);
+  if (acc.busy_on) { await gRefreshBusy(env, acc, run); await gNotifyAffected(env, acc, url.origin); }
+  await send(env, tgId, `Google Календарь подключён${email ? ` (${esc(email)})` : ''}. Уроки появятся в календаре «SlotMate»${acc.busy_on ? ', а занятое время из вашего основного календаря приложение будет учитывать при переносах' : ''}.`, appButton(url.origin, 'Открыть расписание'));
+  return gPage('Готово!', `Google Календарь подключён${email ? ` — ${esc(email)}` : ''}. Уроки появятся в календаре «SlotMate». Можно вернуться в Телеграм.`, bot);
+}
+
+// Что знает приложение о подключении (для раздела в настройках).
+async function gInfo(env, user) {
+  if (!gOn(env) || !(user.tg_id > 0)) return null;
+  const a = await gAccount(env, user.tg_id);
+  return { connected: !!a, status: a ? a.status : null, email: a ? a.email : null, busy_ok: !!(a && a.busy_ok), busy_on: !!(a && a.busy_on) };
+}
+async function gDisconnect(env, user, deleteCalendar) {
+  const acc = await gAccount(env, user.tg_id);
+  if (!acc) return { ok: true };
+  const run = gRun(10);
+  if (acc.status === 'ok') {
+    if (deleteCalendar && acc.calendar_id) await gApi(env, acc, run, 'DELETE', `/calendars/${encodeURIComponent(acc.calendar_id)}`);
+    try { await gFetch(run, `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(await gDecrypt(env, acc.refresh_enc))}`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' } }); } catch (e) { /* не страшно */ }
+  }
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM google_accounts WHERE tg_id = ?').bind(user.tg_id),
+    env.DB.prepare('DELETE FROM gcal_events WHERE tg_id = ?').bind(user.tg_id),
+    env.DB.prepare('DELETE FROM gcal_busy WHERE teacher_id = ?').bind(user.tg_id),
+  ]);
+  return { ok: true };
+}
+async function gSetBusy(env, user, on) {
+  const acc = await gAccount(env, user.tg_id);
+  if (!acc || acc.status !== 'ok') return { error: 'Сначала подключите Google Календарь' };
+  if (on && !acc.busy_ok) return { error: 'Подключите Google заново и разрешите доступ к занятости' };
+  await env.DB.prepare('UPDATE google_accounts SET busy_on = ? WHERE tg_id = ?').bind(on ? 1 : 0, user.tg_id).run();
+  if (!on) { await env.DB.prepare('DELETE FROM gcal_busy WHERE teacher_id = ?').bind(user.tg_id).run(); return { ok: true }; }
+  acc.busy_on = 1;
+  await gRefreshBusy(env, acc, gRun(10));
+  return { ok: true };
+}
+// Раз в час: занятость (если старше 50 минут), сверка всех подключённых, сообщения о накладках.
+async function gHourly(env, origin) {
+  if (!gOn(env)) return;
+  const run = gRun(25);
+  const { results } = await env.DB.prepare("SELECT * FROM google_accounts WHERE status = 'ok' ORDER BY COALESCE(busy_synced_at, '') ASC").all();
+  const stale = nowLocal(-50 * 60 * 1000);
+  for (const acc of results) {
+    if (run.calls >= run.max) break;
+    if (acc.busy_on && (!acc.busy_synced_at || acc.busy_synced_at < stale) && (await gRefreshBusy(env, acc, run))) await gNotifyAffected(env, acc, origin);
+    await gSyncUser(env, acc, run);
+  }
 }

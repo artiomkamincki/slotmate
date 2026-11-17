@@ -9,7 +9,7 @@ try { ({ chromium } = await import('playwright')); } catch (e) {
   console.log('пропущен: нет playwright (в папке code выполни: npm install && npx playwright install chromium)');
   process.exit(0);
 }
-const { api, msg, call, initData, day, db, expect, done } = await import('./harness.mjs');
+const { api, msg, call, initData, day, db, expect, done, google } = await import('./harness.mjs');
 const SCREENS = fileURLToPath(new URL('./screens/', import.meta.url));
 fs.mkdirSync(SCREENS, { recursive: true });
 
@@ -52,6 +52,13 @@ await api(PAV, 'lesson/add', { student_id: all.find((x) => x.name === 'Томе�
 db.prepare('INSERT INTO lessons (teacher_id, student_id, starts_at) VALUES (?, ?, ?)').run(333, all.find((x) => x.name === 'Ева').id, `${day(0)} 19:00`);
 
 
+
+// Павел подключил Google Календарь; во вторник следующей недели у него в Google занято 19:00–22:00 (видно серой строкой)
+{ const st = new URL((await api(PAV, 'google/start')).j.url).searchParams.get('state');
+  await call(`/google/callback?code=ui&state=${encodeURIComponent(st)}`);
+  const ms = (ts) => { for (const off of [1, 2]) { const d0 = new Date(Date.parse(`${ts.replace(' ', 'T')}:00Z`) - off * 3600e3); if (d0.toLocaleString('sv-SE', { timeZone: 'Europe/Warsaw' }).slice(0, 16) === ts) return d0.toISOString(); } };
+  google.busy = [{ start: ms(`${d(1)} 19:00`), end: ms(`${d(1)} 22:00`) }];
+  await api(PAV, 'google/busy', { on: true }); }
 
 const server = http.createServer(async (req, res) => {
   const chunks = []; for await (const c of req) chunks.push(c);

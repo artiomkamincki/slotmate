@@ -31,7 +31,45 @@ function stmt(sql, args = []) {
 }
 const DB = { prepare: (sql) => stmt(sql), batch: async (list) => { db.exec('BEGIN'); try { for (const s of list) s._exec(); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; } return []; } };
 export const TOKEN = '123:TESTTOKEN';
-export const env = { DB, BOT_TOKEN: TOKEN };
+export const env = { DB, BOT_TOKEN: TOKEN, GOOGLE_CLIENT_ID: 'test-client', GOOGLE_CLIENT_SECRET: 'test-secret', GCAL_KEY: 'test-key' };
+// Поддельный Google: календари, события, занятость. Тесты могут менять google.busy, google.scope, google.revoked.
+export const google = { calendars: new Map(), events: new Map(), busy: [], scope: null, email: 'teacher@gmail.com', revoked: new Set(), calls: [], n: 0 };
+const gres = (status, data) => ({ ok: status >= 200 && status < 300, status, json: async () => { if (data === undefined) throw new Error('no body'); return data; } });
+function fakeGoogle(url, opts = {}) {
+  const u = new URL(url), method = (opts.method || 'GET').toUpperCase();
+  google.calls.push(`${method} ${u.host}${u.pathname}`);
+  if (u.host === 'oauth2.googleapis.com' && u.pathname === '/token') {
+    const b = new URLSearchParams(opts.body);
+    if (b.get('grant_type') === 'authorization_code') {
+      const scope = google.scope || 'openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.app.created https://www.googleapis.com/auth/calendar.freebusy';
+      const idt = ['x', Buffer.from(JSON.stringify({ email: google.email })).toString('base64url'), 'y'].join('.');
+      return gres(200, { access_token: 'at', refresh_token: `rt-${b.get('code')}`, id_token: idt, scope });
+    }
+    if (google.revoked.has(b.get('refresh_token'))) return gres(400, { error: 'invalid_grant' });
+    return gres(200, { access_token: 'at' });
+  }
+  if (u.host === 'oauth2.googleapis.com' && u.pathname === '/revoke') return gres(200, {});
+  const path = u.pathname.replace('/calendar/v3', '');
+  const body = opts.body ? JSON.parse(opts.body) : null;
+  let m;
+  if (path === '/freeBusy') return gres(200, { calendars: { primary: { busy: google.busy } } });
+  if (path === '/calendars' && method === 'POST') { const id = `cal${++google.n}@group.calendar.google.com`; google.calendars.set(id, body); return gres(200, { id, ...body }); }
+  if ((m = path.match(/^\/calendars\/([^/]+)$/))) {
+    const id = decodeURIComponent(m[1]);
+    if (!google.calendars.has(id)) return gres(404, { error: { message: 'Not Found' } });
+    if (method === 'DELETE') { google.calendars.delete(id); for (const [k, e] of google.events) if (e.cal === id) google.events.delete(k); return gres(204); }
+    return gres(200, { id });
+  }
+  if ((m = path.match(/^\/calendars\/([^/]+)\/events(?:\/([^/]+))?$/))) {
+    const cal = decodeURIComponent(m[1]), eid = m[2] && decodeURIComponent(m[2]);
+    if (!google.calendars.has(cal)) return gres(404, { error: { message: 'Not Found' } });
+    if (method === 'POST') { const id = `ev${++google.n}`; google.events.set(id, { cal, ...body }); return gres(200, { id }); }
+    if (!google.events.has(eid)) return gres(404, { error: { message: 'Not Found' } });
+    if (method === 'PATCH') { google.events.set(eid, { cal, ...google.events.get(eid), ...body }); return gres(200, { id: eid }); }
+    if (method === 'DELETE') { google.events.delete(eid); return gres(204); }
+  }
+  return gres(404, { error: { message: 'unknown fake google path ' + path } });
+}
 export const sent = [];
 let msgId = 1000;
 const realFetch = globalThis.fetch;
@@ -43,6 +81,7 @@ globalThis.fetch = async (url, opts) => {
     if (method === 'getMe') return { json: async () => ({ ok: true, result: { username: 'Slot_Mate_Bot' } }) };
     return { json: async () => ({ ok: true, result: { message_id: ++msgId } }) };
   }
+  if (typeof url === 'string' && /^https:\/\/(oauth2|www)\.googleapis\.com\//.test(url)) return fakeGoogle(url, opts);
   return realFetch(url, opts);
 };
 export const ORIGIN = 'https://slotmate.test';

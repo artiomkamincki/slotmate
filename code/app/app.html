@@ -50,6 +50,7 @@ h1{font-size:34px;line-height:41px;margin:0;font-weight:700;letter-spacing:.01em
 .free{font-size:17px;color:var(--muted);padding:11px 16px;position:relative}
 .busy{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 6px 6px 16px;min-height:52px;position:relative}
 .busy span{flex:1;min-width:120px;font-size:17px;color:var(--red)}
+.busy.g span{color:var(--muted)}
 .busy .mv{min-height:44px;padding:0 14px;border-radius:999px;background:var(--tint-soft);color:var(--tint);font-weight:600;font-size:15px}
 .busy .x{width:44px;height:44px;color:var(--muted);font-size:17px}
 .card{width:100%;padding:10px 16px;min-height:52px;display:flex;align-items:center;gap:14px;text-align:left;position:relative;background:transparent}
@@ -166,7 +167,7 @@ if(tg){tg.ready();tg.expand();if(tg.onEvent)tg.onEvent('themeChanged',theme);}
 var BB=tg&&tg.BackButton&&tg.isVersionAtLeast&&tg.isVersionAtLeast('6.1')?tg.BackButton:null;
 
 var Q=new URLSearchParams(location.search);
-var S={data:null,mode:'',tab:Q.get('tab')==='pay'?'students':(Q.get('tab')||'week'),weekStart:null,deep:true};
+var S={data:null,mode:'',tab:Q.get('tab')==='pay'?'students':(Q.get('tab')||'week'),weekStart:/^\d{4}-\d\d-\d\d$/.test(Q.get('w')||'')?Q.get('w'):null,deep:true};
 var WD=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 var EVERY=['Каждое воскресенье','Каждый понедельник','Каждый вторник','Каждую среду','Каждый четверг','Каждую пятницу','Каждую субботу'];
 var WDF=['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
@@ -320,7 +321,7 @@ function renderWeek(){
     shown++;
     h+='<div class="day"><div class="dayh"><span>'+WDF[wd(ymd)]+', '+dm(ymd)+'</span>'+(ymd===today()?'<span class="today">сегодня</span>':'')+'</div><div class="group">';
     bs.forEach(function(b){var span=b.from_t==='00:00'&&b.to_t==='23:59'?'весь день':b.from_t+'–'+b.to_t,aff=busyAffected(b);
-      h+='<div class="busy"><span>'+esc(b.note||'Занят')+' · '+span+'</span>'+(aff.length?'<button class="mv" onclick="A.moveBusy('+b.id+')">Перенести уроки ('+aff.length+')</button>':'')+'<button class="x" aria-label="Убрать отметку «'+esc(b.note||'Занят')+'»" onclick="A.unbusy('+b.id+')">✕</button></div>';});
+      h+='<div class="busy'+(b.google?' g':'')+'"><span>'+esc(b.note||'Занят')+' · '+span+'</span>'+(aff.length?'<button class="mv" onclick="A.moveBusy('+b.id+')">Перенести уроки ('+aff.length+')</button>':'')+(b.google?'':'<button class="x" aria-label="Убрать отметку «'+esc(b.note||'Занят')+'»" onclick="A.unbusy('+b.id+')">✕</button>')+'</div>';});
     if(!ls.length&&!bs.length)h+='<div class="free">свободно</div>';
     ls.forEach(function(l){var st=lessonState(l,true);
       h+='<button class="card'+((l.past||l.status==='late')&&st.chip.indexOf('решите')<0?' past':'')+'" onclick="A.lesson('+l.id+')"><span class="t">'+l.starts_at.slice(11,16)+'</span><span class="n"><b>'+esc(l.student_name)+'</b>'+(st.note?'<span>'+esc(st.note)+'</span>':'')+'</span>'+st.chip+'</button>';});
@@ -423,6 +424,13 @@ function seriesSoon(l){return l.is_teaching&&l.series_id&&l.series_end&&l.series
 var A={
   mode:function(m){S.mode=m;render();},
   chat:function(u){var url='https://t.me/'+encodeURIComponent(u);if(tg&&tg.openTelegramLink)tg.openTelegramLink(url);else window.open(url,'_blank');},
+  // Вход в Google — в обычном браузере (так требует Google). Вернулся в Телеграм — обновляем данные.
+  gConnect:function(){api('google/start').then(function(r){S.gWait=true;S.gUrl=r.url;
+      if(tg&&tg.openLink)tg.openLink(r.url);else window.open(r.url,'_blank');
+      openSheet('<h3>Подключение Google</h3><div class="m">Откроется браузер: войдите в Google и нажмите «Разрешить». Потом вернитесь сюда — придёт сообщение от бота.<br><br>Если Google пишет, что браузер не поддерживается, скопируйте ссылку и откройте её в Safari или Chrome.</div><div class="row"><button class="btn sec" onclick="A.gCopy()">Скопировать ссылку</button></div><div class="row"><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>');}).catch(function(){});},
+  gCopy:function(){var u=S.gUrl;if(navigator.clipboard)navigator.clipboard.writeText(u).then(function(){toast('Ссылка скопирована');},function(){toast('Не удалось скопировать');});},
+  gOff:function(){openSheet('<h3>Отключить Google Календарь?</h3><div class="m">Уроки перестанут появляться в Google'+(S.data.is_teacher?', занятость из Google учитываться не будет':'')+'.</div><div class="row"><button class="btn danger" onclick="A.gOffDo(true)">Отключить и удалить календарь «SlotMate»</button></div><div class="row" style="margin-top:4px"><button class="btn sec" onclick="A.gOffDo(false)">Отключить, календарь оставить</button></div><div class="row" style="margin-top:4px"><button class="btn mute" onclick="A.settings()">Отмена</button></div>');},
+  gOffDo:function(del){api('google/disconnect',{delete_calendar:del}).then(function(){closeSheet();toast('Google Календарь отключён');load();}).catch(function(){});},
   inboxMore:function(){S.inboxAll=true;render();},
   tab:function(t){S.tab=t;render();window.scrollTo(0,0);},
   week:function(n){S.weekStart=n===0?monday(today()):addDays(S.weekStart,7*n);load();},
@@ -430,6 +438,7 @@ var A={
     if(nm==='rep'&&(x=document.getElementById('weeksRow')))x.style.display=b.getAttribute('data-v')==='1'?'none':'';
     if(nm==='allday'&&(x=document.getElementById('bhrs')))x.style.display=b.getAttribute('data-v')==='1'?'none':'';
     if(nm==='sdur'||nm==='slate')A.saveSettings();
+    if(nm==='gbusy')api('google/busy',{on:b.getAttribute('data-v')==='1'}).then(function(){toast(b.getAttribute('data-v')==='1'?'Занятость из Google учитывается':'Занятость из Google не учитывается');load();}).catch(function(){});
     A.chk();},
   filter:function(inp){var q=inp.value.trim().toLowerCase();var root=inp.closest('.sheet')||document.getElementById('app');
     Array.prototype.forEach.call(root.querySelectorAll('.card[data-n]'),function(c){c.style.display=!q||c.getAttribute('data-n').indexOf(q)>=0?'':'none';});
@@ -664,6 +673,13 @@ var A={
       h+='<label>Длительность урока по умолчанию</label>'+opts('sdur',[[45,'45 мин'],[60,'60 мин'],[90,'90 мин']],st.default_duration);
       h+='<label>Ученик отменил поздно — списать?</label>'+opts('slate',[[0,'Нет'],[6,'< 6 ч'],[12,'< 12 ч'],[24,'< 24 ч']],st.late_hours)+'<div class="hint">Если ученик сам отменит урок позже этого срока, урок спишется. Вы всегда отменяете без списания.</div>';
       h+='<div class="hint">Изменения сохраняются сами.</div>';}
+    var g=d.google;
+    if(g&&!S.demo){h+='<div class="sect">Google Календарь</div>';
+      if(!g.connected||g.status!=='ok')h+='<div class="m">'+(g.status==='revoked'?'Доступ к Google был отозван — подключите снова.':'Уроки сразу появятся в вашем Google Календаре, в отдельном календаре «SlotMate»'+(d.is_teacher&&S.mode==='t'?'. А приложение сможет учитывать, когда вы заняты по своему календарю.':'.'))+'</div><div class="row"><button class="btn sec" onclick="A.gConnect()">Подключить Google Календарь</button></div>';
+      else{h+='<div class="m">Подключено'+(g.email?': <b>'+esc(g.email)+'</b>':'')+'. Уроки — в календаре «SlotMate».</div>';
+        if(d.is_teacher&&S.mode==='t'){if(g.busy_ok)h+='<label>Учитывать мою занятость из Google</label>'+opts('gbusy',[[1,'Да'],[0,'Нет']],g.busy_on?1:0)+'<div class="hint">Приложение видит только «занят / свободен» в вашем основном календаре, без названий событий. Это время — как «Я занят».</div>';
+          else h+='<div class="hint">Чтобы учитывать занятость из Google, подключите его заново и разрешите доступ к занятости.</div><div class="row"><button class="btn sec" onclick="A.gConnect()">Подключить заново</button></div>';}
+        h+='<div class="row"><button class="btn dghost" onclick="A.gOff()">Отключить Google Календарь</button></div>';}}
     h+='<div class="sect">Календарь телефона</div><div class="m">Подпишитесь один раз — уроки и переносы будут появляться в календаре сами.</div><div class="row"><button class="btn sec" onclick="A.calendar()">Получить ссылку</button></div>';
     if(d.is_admin&&!S.demo)h+='<div class="sect">Владелец</div><div class="row"><button class="btn sec" onclick="A.teacherInvite()">Ссылка для нового учителя</button></div><div class="row"><button class="btn sec" onclick="A.demo()">Кабинет учителя (демо)</button></div>';
     openSheet(h+'<div class="row"><button class="btn mute" onclick="closeSheetX()">Закрыть</button></div>');if(document.getElementById('perL'))A.perLesson();},
@@ -688,6 +704,7 @@ function share(link,text){
   else{S.shareLink=link;openSheet('<h3>Ссылка-приглашение</h3><div class="link">'+esc(link)+'</div><div class="row"><button class="btn" onclick="A.copyShare()">Скопировать</button></div>');}
 }
 A.copyShare=function(){copyText(S.shareLink);};
+document.addEventListener('visibilitychange',function(){if(!document.hidden&&S.gWait){S.gWait=false;closeSheet();load();}});
 load().catch(function(e){document.getElementById('app').innerHTML='<div class="lead">Не удалось открыть: '+esc(e.message)+'.<br>Откройте приложение из чата с ботом.</div>';});
 })();
 </script>
